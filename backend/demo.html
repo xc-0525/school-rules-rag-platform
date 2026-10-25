@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>校纪校规问答 · 极简演示</title>
+  <style>
+    :root { --brand: #2f6fed; --bg: #f5f7fb; --border: #e2e8f2; --text: #1f2937; --muted: #6b7280; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; }
+    main { max-width: 820px; margin: 0 auto; padding: 32px 20px 64px; }
+    header h1 { font-size: 22px; margin: 0 0 6px; }
+    header p { margin: 0 0 24px; color: var(--muted); font-size: 14px; line-height: 1.7; }
+    .card { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    textarea { width: 100%; min-height: 84px; resize: vertical; padding: 12px;
+               border: 1px solid var(--border); border-radius: 8px; font: inherit; }
+    textarea:focus { outline: 2px solid rgba(47, 111, 237, .25); border-color: var(--brand); }
+    .row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+    button { background: var(--brand); color: #fff; border: 0; border-radius: 8px;
+             padding: 10px 22px; font: inherit; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .status { color: var(--muted); font-size: 13px; }
+    .examples { margin: 14px 0 24px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .examples span { background: #fff; border: 1px solid var(--border); color: var(--muted);
+                     border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+    .examples span:hover { color: var(--brand); border-color: var(--brand); }
+    #answer-box { margin-top: 18px; display: none; }
+    #answer { white-space: pre-wrap; line-height: 1.9; min-height: 24px; }
+    #answer .cursor { color: var(--brand); animation: blink .8s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    h3 { font-size: 15px; margin: 0 0 12px; }
+    .sources { margin-top: 20px; border-top: 1px dashed var(--border); padding-top: 14px; }
+    .sources h4 { font-size: 13px; margin: 0 0 10px; color: var(--muted); }
+    .source { background: #f8fafd; border: 1px solid var(--border); border-radius: 8px;
+              padding: 10px 12px; margin-bottom: 8px; font-size: 13px; line-height: 1.7; }
+    .source .tag { display: inline-block; background: #e8f0fe; color: var(--brand);
+                   border-radius: 4px; padding: 0 6px; margin-right: 6px; font-size: 12px; }
+    .source .meta { color: var(--muted); font-size: 12px; }
+    .error { color: #b91c1c; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>校纪校规智能问答 · 极简版主循环</h1>
+    <p>检索 Agent（Mock Qdrant）+ 图谱 Agent（Mock Neo4j）并行召回 → 证据融合 → DeepSeek 流式生成 → MySQL 落库（Mock）。</p>
+  </header>
+
+  <div class="card">
+    <textarea id="query" placeholder="请输入你的问题，例如：宿舍晚上几点熄灯？">宿舍晚上几点熄灯？</textarea>
+    <div class="row">
+      <button id="send">提问</button>
+      <span class="status" id="status">就绪</span>
+    </div>
+  </div>
+
+  <div class="examples" id="examples">
+    <span>宿舍晚上几点熄灯？</span>
+    <span>考试时带手机进考场会怎么处理？</span>
+    <span>申请国家奖学金需要什么条件？</span>
+    <span>请假三天以上怎么审批？</span>
+    <span>今天天气怎么样？（演示无证据拒答）</span>
+  </div>
+
+  <section class="card" id="answer-box">
+    <h3>回答 <span class="status" id="meta"></span></h3>
+    <div id="answer"></div>
+    <div class="sources" id="sources" style="display: none;">
+      <h4>依据来源</h4>
+      <div id="source-list"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const queryEl = $("query"), sendBtn = $("send"), statusEl = $("status");
+  const boxEl = $("answer-box"), answerEl = $("answer"), metaEl = $("meta");
+  const sourcesEl = $("sources"), sourceListEl = $("source-list");
+
+  // 点击示例问题，直接填入输入框
+  $("examples").addEventListener("click", (event) => {
+    if (event.target.tagName === "SPAN") queryEl.value = event.target.textContent.replace("（演示无证据拒答）", "");
+  });
+
+  let currentAnswer = "";
+
+  function setStatus(text, isError = false) {
+    statusEl.textContent = text;
+    statusEl.classList.toggle("error", isError);
+  }
+
+  function renderSources(sources) {
+    sourceListEl.innerHTML = "";
+    if (!sources || sources.length === 0) { sourcesEl.style.display = "none"; return; }
+    sources.forEach((item) => {
+      const div = document.createElement("div");
+      div.className = "source";
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = item.type === "graph" ? "图谱" : "向量";
+      const title = document.createElement("strong");
+      title.textContent = item.title;
+      const detail = document.createElement("div");
+      detail.className = "meta";
+      detail.textContent = item.detail;
+      const snippet = document.createElement("div");
+      snippet.textContent = item.snippet;
+      div.append(tag, title, detail, snippet);
+      sourceListEl.appendChild(div);
+    });
+    sourcesEl.style.display = "block";
+  }
+
+  function handleEvent(raw) {
+    let event = "message", data = "";
+    raw.split(/\r?\n/).forEach((line) => {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) data += line.slice(5).trim();
+    });
+    if (!data) return;
+    const payload = JSON.parse(data);
+
+    if (event === "meta") {
+      if (!payload.evidence_found) metaEl.textContent = "（未召回证据，触发防幻觉拒答）";
+      renderSources(payload.sources);
+    } else if (event === "delta") {
+      currentAnswer += payload.content;
+      answerEl.textContent = currentAnswer;
+      answerEl.scrollIntoView({ block: "end" });
+    } else if (event === "error") {
+      setStatus("调用失败：" + payload.message, true);
+    } else if (event === "done") {
+      setStatus(`完成 · ${payload.latency_ms} ms${payload.refused ? " · 已拒答" : ""}`);
+      renderSources(payload.sources);
+    }
+  }
+
+  async function ask() {
+    const query = queryEl.value.trim();
+    if (!query) return;
+
+    currentAnswer = "";
+    answerEl.textContent = "";
+    metaEl.textContent = "";
+    renderSources([]);
+    boxEl.style.display = "block";
+    sendBtn.disabled = true;
+    setStatus("正在召回证据并调用 DeepSeek…");
+
+    try {
+      const response = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, stream: true }),
+      });
+
+      // 非流式错误（如 500 未配置 Key / 502 大模型异常）会走到这里
+      if (!response.ok) {
+        let message = `HTTP ${response.status}`;
+        try { message = (await response.json()).detail || message; } catch (_) {}
+        setStatus("请求失败：" + message, true);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let index;
+        while ((index = buffer.indexOf("\n\n")) >= 0) {
+          handleEvent(buffer.slice(0, index));
+          buffer = buffer.slice(index + 2);
+        }
+      }
+    } catch (error) {
+      setStatus("网络异常：" + error.message, true);
+    } finally {
+      sendBtn.disabled = false;
+    }
+  }
+
+  sendBtn.addEventListener("click", ask);
+  queryEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) ask();
+  });
+</script>
+</body>
+</html>

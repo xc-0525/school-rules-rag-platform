@@ -1,0 +1,14 @@
+# 极简版主循环依赖（Python 3.10+）
+# 安装：pip install -r requirements.txt
+
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+openai>=1.30.0
+pydantic>=2.6.0
+python-dotenv>=1.0.0
+
+# 说明：
+# - 本 Demo 暂不需要 SQLAlchemy / pymysql / qdrant-client / neo4j 驱动，
+#   数据库相关逻辑目前全部是 Mock（详见 main.py 中 save_to_mysql / agent_retrieve / agent_graph）。
+# - 后续接入真实三库时，再按需增加：
+#   sqlalchemy>=2.0  pymysql  qdrant-client  neo4j  sentence-transformers

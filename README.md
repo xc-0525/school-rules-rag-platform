@@ -15,6 +15,47 @@
 
 ---
 
+## 📌 当前进度（2026-10-25 更新）
+
+> **最小可演示闭环（MVP）已跑通** —— 一条 `POST /chat` 请求即可完成：
+> **检索 Agent（Mock Qdrant）+ 图谱 Agent（Mock Neo4j）并行召回 → 多路证据融合 → 防幻觉拒答 → DeepSeek 真实流式生成（SSE）→ MySQL 落库（Mock）**。
+> 全程**无需安装 MySQL / Qdrant / Neo4j**，只要有 Python 3.10+ 和 DeepSeek API Key，今晚就能演示。
+
+| 模块 | 当前状态 | 代码位置 |
+| --- | --- | --- |
+| 极简版主循环 `POST /chat` | ✅ 已完成，可直接运行 | [`backend/main.py`](backend/main.py) |
+| 检索 Agent（模拟 Qdrant 向量召回） | ✅ Mock | `agent_retrieve()` |
+| 图谱 Agent（模拟 Neo4j 多跳推理） | ✅ Mock | `agent_graph()` |
+| 多路证据融合 + 来源引用 | ✅ 已完成 | `fuse_evidence()` / `build_sources()` |
+| 防幻觉校验（无证据直接拒答，不调大模型） | ✅ 已完成 | `/chat` 内分支 |
+| DeepSeek 证据约束生成（SSE 流式） | ✅ 真实调用，异常已兜底 | `agent_generate()` |
+| MySQL 问答记录落库 | 🚧 Mock（`print` 模拟） | `save_to_mysql()` |
+| 浏览器流式演示页 | ✅ 已完成（无需前端构建） | [`backend/demo.html`](backend/demo.html) |
+| 真实 MySQL / Qdrant / Neo4j 接入 | 📋 待开发 | 规划中的 `backend/app/` |
+| Vue3 前端（流式问答 / 来源展示） | 📋 待开发 | 规划中的 `frontend/` |
+
+**启动三步**（完整说明见下文 [6.2 极简版 Demo](#62-极简版-demo当前可运行--无需任何数据库)）：
+
+```bash
+cd backend
+pip install -r requirements.txt
+copy .env.example .env          # 填入 DEEPSEEK_API_KEY（Linux/macOS 用 cp）
+uvicorn main:app --reload --port 8000
+# Swagger UI: http://127.0.0.1:8000/docs    流式演示页: http://127.0.0.1:8000/
+```
+
+> 已完成 **40 项本地冒烟检查**（正常问答 / 流式事件顺序 / 无证据拒答 / 未配置 Key / Key 无效 / 连接失败 / Prompt 证据约束 / Swagger 与演示页）。
+> 大模型调用链路是用**本地 OpenAI 兼容 Mock 服务**验证的（不消耗额度），真实 DeepSeek 的回答效果需填入自己的 Key 后确认。
+
+### ⚠️ 已知限制与待补事项
+
+1. **MySQL / Qdrant / Neo4j 均为 Mock**：当前只验证编排与生成链路，不代表真实召回的准确率；
+2. **`sql/init_mysql.sql` 尚未提交到本仓库**：第五章的建表设计已完成，但脚本文件目前不在仓库中，接入真实 MySQL 前需要补上；
+3. **Swagger UI 中的流式响应是“一次性显示”的**：浏览器内看不到打字机效果，演示流式请用 <http://127.0.0.1:8000/> 演示页或 `curl -N`；
+4. 尚无鉴权、多轮会话、语义缓存与前端工程，这些属于下一阶段。
+
+---
+
 ## 一、项目背景
 
 学生在查询校纪校规时长期面临三类痛点：
@@ -155,7 +196,8 @@ erDiagram
 | 8 | `document_tags` | 文档标签表 | `name` 唯一（学籍管理、违纪处分等） |
 | 9 | `document_tag_relations` | 文档-标签关联表（多对多） | `document_id` + `tag_id` 联合唯一 |
 
-> 建表脚本：`sql/init_mysql.sql`（MySQL 8.0+，utf8mb4 / InnoDB，含外键级联策略与索引设计）。
+> 建表脚本（规划）：`sql/init_mysql.sql`（MySQL 8.0+，utf8mb4 / InnoDB，含外键级联策略与索引设计）。
+> ⚠️ 该脚本目前尚未提交到本仓库，接入真实 MySQL 前需补齐；极简版 Demo 不依赖它。
 
 ### 5.4 初始化数据
 
@@ -164,26 +206,122 @@ erDiagram
 
 ## 六、快速开始
 
-> 项目处于开发阶段，以下环境要求与启动方式以最终代码为准。
+> 项目处于开发阶段。**当前唯一可运行的代码是「极简版 Demo」（6.2 节）**，不需要安装任何数据库；
+> 6.3 节之后是完整版（三库 + 前端）的规划与启动方式，相关代码尚未落地。
 
 ### 6.1 环境要求
 
-- Python 3.10+
-- Node.js 18+
-- MySQL 8.0+
-- Neo4j 5.x
-- Qdrant 1.x（推荐 Docker 部署）
-- 本地 BGE-small-zh 模型
-- DeepSeek API Key
+| 场景 | 需要准备 |
+| --- | --- |
+| 极简版 Demo（当前可跑） | Python 3.10+、DeepSeek API Key |
+| 完整版（规划中） | 另需 Node.js 18+、MySQL 8.0+、Neo4j 5.x、Qdrant 1.x、本地 BGE-small-zh 模型 |
 
-### 6.2 初始化 MySQL
+### 6.2 极简版 Demo（当前可运行 · 无需任何数据库）
+
+#### ① 安装依赖
+
+```bash
+cd backend
+python -m venv .venv
+# Windows PowerShell:      .\.venv\Scripts\Activate.ps1
+# Windows CMD:             .venv\Scripts\activate.bat
+# Linux / macOS:           source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+> 也可以跳过虚拟环境，直接 `pip install -r requirements.txt` 后用系统 Python 启动。
+
+#### ② 配置 `.env`
+
+```bash
+copy .env.example .env               # 若 backend/.env 已存在可跳过；Linux/macOS 用 cp .env.example .env
+```
+
+编辑 `backend/.env`，把 `DEEPSEEK_API_KEY` 换成自己的真实 Key（其余保持默认即可）：
+
+```env
+DEEPSEEK_API_KEY=sk-你的真实密钥
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+LLM_TEMPERATURE=0.2
+LLM_TIMEOUT_SECONDS=60
+```
+
+> `.env` 已被 `.gitignore` 忽略，不会被提交到仓库。
+
+#### ③ 启动服务
+
+```bash
+uvicorn main:app --reload --port 8000
+```
+
+看到 `Uvicorn running on http://127.0.0.1:8000` 即启动成功。
+每次问答结束后，终端会打印一行 `[MySQL-Mock] ... 已存入数据库：...`，代表 Mock 落库成功。
+
+#### ④ Swagger UI 测试
+
+1. 浏览器打开 <http://127.0.0.1:8000/docs>；
+2. 展开 `POST /chat` → 点击 **Try it out**；
+3. 请求体填（先用 `stream=false` 看结构化结果）：
+
+```json
+{
+  "query": "宿舍晚上几点熄灯？",
+  "stream": false
+}
+```
+
+4. 点击 **Execute**，可看到 `answer` / `sources` / `evidence_found` / `latency_ms` 四个字段；
+5. 把 `stream` 改成 `true` 再执行，响应体会变成 SSE 原始事件流（`event: meta` / `event: delta` / `event: done`）。
+   注意 Swagger 会把流式响应**一次性**显示出来，想看“打字机”效果请用第 ⑤ 步的演示页。
+
+#### ⑤ 浏览器流式演示（答辩演示推荐）
+
+打开 <http://127.0.0.1:8000/>，页面内置 5 个示例问题，答案逐字输出，并在下方展示向量 / 图谱来源引用。
+
+#### ⑥ curl 直接测试
+
+```bash
+# 非流式
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"query":"宿舍晚上几点熄灯？","stream":false}'
+
+# 流式：-N 关闭 curl 自身缓冲，才能看到逐块输出
+curl -N -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"query":"考试时带手机进考场会怎么处理？","stream":true}'
+```
+
+#### ⑦ SSE 事件格式（前端对接用）
+
+| 事件 | data 示例 | 说明 |
+| --- | --- | --- |
+| `meta` | `{"evidence_found":true,"sources":[...]}` | 证据召回结果，先于正文推送 |
+| `delta` | `{"content":"根据"}` | 大模型逐字增量，前端追加渲染即可 |
+| `error` | `{"message":"DeepSeek 鉴权失败……"}` | 终止事件，之后不会再有 `done` |
+| `done` | `{"answer":"...","latency_ms":1200,"refused":false}` | 完整答案、耗时、是否为防幻觉拒答 |
+
+#### ⑧ 演示问题清单
+
+| 提问 | 预期表现 |
+| --- | --- |
+| 宿舍晚上几点熄灯？ | 命中向量 + 图谱证据，正常流式作答 |
+| 考试时带手机进考场会怎么处理？ | 命中考试纪律条款，正常作答 |
+| 国家奖学金需要什么条件？ | 命中奖学金条款，正常作答 |
+| 请假三天以上怎么审批？ | 命中考勤条款，正常作答 |
+| 今天天气怎么样？ | `evidence_found=false`，直接拒答且**不调用大模型** |
+
+### 6.3 初始化 MySQL（完整版 · 规划中）
+
+> 下列命令依赖尚未提交的 `sql/init_mysql.sql` 与规划中的 `backend/app/`，当前仅作设计参考。
 
 ```bash
 # 创建数据库 school_rules_rag 并建表、写入初始数据
 mysql -u root -p < sql/init_mysql.sql
 ```
 
-### 6.3 启动 Qdrant / Neo4j（Docker）
+### 6.4 启动 Qdrant / Neo4j（完整版 · Docker）
 
 ```bash
 docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant
@@ -191,7 +329,7 @@ docker run -d --name neo4j -p 7474:7474 -p 7687:7687 \
   -e NEO4J_AUTH=neo4j/yourpassword neo4j:5
 ```
 
-### 6.4 后端配置（`.env`）
+### 6.5 完整版后端配置（规划中）
 
 ```env
 MYSQL_URL=mysql+pymysql://root:password@127.0.0.1:3306/school_rules_rag
@@ -206,12 +344,11 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 
 ```bash
 cd backend
-python -m venv .venv && source .venv/Scripts/activate   # Windows
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 6.5 前端启动
+### 6.6 前端启动（规划中）
 
 ```bash
 cd frontend
@@ -219,23 +356,26 @@ npm install
 npm run dev
 ```
 
-## 七、项目结构（规划）
+## 七、项目结构
 
 ```text
 school-rules-rag-platform/
-├── backend/                # FastAPI 后端
-│   ├── app/
-│   │   ├── agents/         # 检索 / 图谱 / 生成智能体与编排
-│   │   ├── api/            # 路由（鉴权、会话、文档、问答 SSE）
-│   │   ├── core/           # 配置、安全、日志
-│   │   ├── db/             # MySQL / Qdrant / Neo4j 连接管理
-│   │   ├── models/         # SQLAlchemy ORM 模型
-│   │   ├── schemas/        # Pydantic 模型
-│   │   └── services/       # 文档解析切分、向量入库、语义缓存
-│   └── requirements.txt
-├── frontend/               # Vue3 前端
+├── backend/
+│   ├── main.py              # ✅ 极简版主循环（当前唯一可运行代码）
+│   ├── requirements.txt     # ✅ 极简版依赖（FastAPI / Uvicorn / openai / pydantic / python-dotenv）
+│   ├── .env.example         # ✅ 环境变量模板（复制为 .env 后填 DeepSeek Key）
+│   ├── demo.html            # ✅ 浏览器流式演示页（由 GET / 返回）
+│   └── app/                 # 📋 完整版工程结构（规划中）
+│       ├── agents/          # 检索 / 图谱 / 生成智能体与编排
+│       ├── api/             # 路由（鉴权、会话、文档、问答 SSE）
+│       ├── core/            # 配置、安全、日志
+│       ├── db/              # MySQL / Qdrant / Neo4j 连接管理
+│       ├── models/          # SQLAlchemy ORM 模型
+│       ├── schemas/         # Pydantic 模型
+│       └── services/        # 文档解析切分、向量入库、语义缓存
+├── frontend/                # 📋 Vue3 前端（待开发）
 ├── sql/
-│   └── init_mysql.sql      # MySQL 建表与初始化脚本
+│   └── init_mysql.sql       # 📋 MySQL 建表与初始化脚本（待补提交）
 ├── LICENSE
 └── README.md
 ```
@@ -245,22 +385,24 @@ school-rules-rag-platform/
 ### ✅ 已完成
 
 - 系统总体架构设计：MySQL + Neo4j + Qdrant 多库混合存储方案
-- MySQL 数据库设计：9 张建表脚本、外键与索引、ID 映射与溯源链路
+- MySQL 数据库设计：9 张表、外键与索引、`qdrant_point_id` 映射与溯源链路
 - Neo4j 图谱本体（Ontology）设计
+- **多智能体问答最小闭环（可运行）**：检索 / 图谱 Agent 并行召回（Mock）+ 多路证据融合 + 防幻觉拒答 + DeepSeek 证据约束流式生成（SSE）+ MySQL Mock 落库
+- 配套工程化：Swagger 文档、`/health` 健康检查、浏览器流式演示页、40 项本地冒烟检查
 
 ### 🚧 进行中
 
-- 多智能体编排："检索 - 图谱 - 生成"工作流
+- 用真实 MySQL / Qdrant / Neo4j 替换现有 Mock（迁移到 `backend/app/` 工程结构）
 - 文档解析切分与 BGE-small-zh 向量入库
-- 打通"图谱 + 向量"双路召回链路
+- 打通"图谱 + 向量"双路真实召回链路
 
 ### 📋 后续计划
 
-- 证据约束生成、无证据拒答与人工引导
+- 证据约束生成的评测（命中率、拒答准确率、响应延迟）
 - 高频问题语义缓存
 - Vue3 前端与 SSE 流式问答、来源引用展示
 - 文档管理后台、反馈、标签与公告模块
-- 问答质量评测（命中率、拒答准确率、响应延迟）
+- 补齐 `sql/init_mysql.sql` 建表脚本并完成三库联调
 
 ## 九、开源协议
 
