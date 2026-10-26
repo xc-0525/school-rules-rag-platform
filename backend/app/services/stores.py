@@ -186,7 +186,11 @@ class QdrantVectorStore:
             Evidence(
                 type="vector",
                 title=hit.payload.get("document", ""),
-                detail=hit.payload.get("chapter", ""),
+                detail=" · ".join(
+                    value
+                    for value in (hit.payload.get("chapter"), hit.payload.get("article"))
+                    if value
+                ),
                 snippet=hit.payload.get("content", ""),
                 score=float(hit.score),
             )
@@ -194,13 +198,95 @@ class QdrantVectorStore:
         ]
 
 
-class Neo4jGraphStore:
-    """Neo4j 图谱检索。Day5 实现。"""
+# 查询关键词：来自意图词典 + 查询扩展词典 + 校规高频词（中文小语料用包含匹配最稳）
+_GRAPH_TERMS: set[str] = set()
+for _keywords in mock_data.INTENT_KEYWORDS.values():
+    _GRAPH_TERMS.update(_keywords)
+for _synonyms in mock_data.EXPANSIONS.values():
+    _GRAPH_TERMS.update(_synonyms)
+_GRAPH_TERMS.update(
+    {
+        "熄灯", "晚归", "夜不归宿", "查寝", "电器", "大功率", "作弊", "手机", "考试",
+        "奖学金", "助学金", "励志", "请假", "旷课", "考勤", "打架", "斗殴", "处分",
+        "开除", "记过", "留校察看", "论文", "抄袭", "学籍", "注册", "转专业", "休学",
+        "退学", "补考", "重修", "评奖", "评优", "宿舍", "宿舍管理", "总则", "附则",
+    }
+)
 
-    def __init__(self, uri: str = "", user: str = "neo4j", password: str = "") -> None:
-        self.uri = uri
+
+def extract_graph_keywords(query: str) -> list[str]:
+    """从问题中抽取用于图谱检索的关键词（按长度倒序，优先长词）。"""
+    matched = [term for term in _GRAPH_TERMS if term in query]
+    matched.sort(key=len, reverse=True)
+    return list(dict.fromkeys(matched))
+
+
+class Neo4jGraphStore:
+    """Neo4j 图谱检索。
+
+    图谱结构（文档级）：
+        (RuleDocument)-[:HAS_CHAPTER]->(Chapter)-[:HAS_RULE]->(Rule)-[:ABOUT]->(Topic)
+
+    检索方式：用问题关键词在 Rule.content / article / Chapter.title 上做包含匹配，
+    命中后沿"文档 → 章节 → 条款 → 主题"遍历，返回证据片段（中文小语料下比全文索引更稳）。
+    """
+
+    def __init__(
+        self,
+        uri: str = "",
+        user: str = "",
+        password: str = "",
+        database: str = "neo4j",
+    ) -> None:
+        self.uri = uri or "bolt://127.0.0.1:7687"
         self.user = user
         self.password = password
+        self.database = database
+
+    def _auth(self) -> tuple[str, str] | None:
+        return (self.user, self.password) if (self.user or self.password) else None
 
     async def search_paths(self, query: str, top_k: int = 2) -> list[Evidence]:
-        raise NotImplementedError("Neo4j 适配器将在 Day5 接入")
+        return await asyncio.to_thread(self._search_sync, query, top_k)
+
+    def _search_sync(self, query: str, top_k: int) -> list[Evidence]:
+        keywords = extract_graph_keywords(query)
+        if not keywords:
+            return []
+
+        from neo4j import GraphDatabase
+
+        cypher = """
+        MATCH (d:RuleDocument)-[:HAS_CHAPTER]->(c:Chapter)-[:HAS_RULE]->(r:Rule)
+        WHERE any(kw IN $keywords WHERE r.content CONTAINS kw
+                  OR r.article CONTAINS kw OR c.title CONTAINS kw)
+        OPTIONAL MATCH (r)-[:ABOUT]->(t:Topic)
+        WITH d, c, r, collect(DISTINCT t.name) AS topics
+        WITH d, c, r, topics,
+             size([kw IN $keywords WHERE r.content CONTAINS kw
+                   OR r.article CONTAINS kw OR c.title CONTAINS kw]) AS hits
+        RETURN d.title AS document, c.title AS chapter, r.article AS article,
+               r.content AS content, topics, hits
+        ORDER BY hits DESC, document, article
+        LIMIT $top_k
+        """
+        driver = GraphDatabase.driver(self.uri, auth=self._auth())
+        try:
+            with driver.session(database=self.database) as session:
+                rows = session.run(cypher, keywords=keywords, top_k=top_k).data()
+        finally:
+            driver.close()
+
+        evidence: list[Evidence] = []
+        for row in rows:
+            topics = "、".join(row.get("topics") or []) or "校规"
+            evidence.append(
+                Evidence(
+                    type="graph",
+                    title=f"知识图谱 · {row['document']}",
+                    detail=f"{row['chapter']} · {row['article']}（主题：{topics}）",
+                    snippet=row["content"],
+                    score=min(0.95, 0.55 + 0.1 * int(row.get("hits") or 1)),
+                )
+            )
+        return evidence

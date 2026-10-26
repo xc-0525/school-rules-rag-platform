@@ -1,8 +1,10 @@
 # v2 架构设计（课程答辩版）
 
 > 状态：**Day1 已完成**（图引擎 + 10+ 节点 + SSE 轨迹 + Mock 适配器）
-> **Day2 已完成**：真实 Qdrant（本地嵌入式）+ 本地 BGE、MySQL 9 表建库、问答落库、会话历史、点赞点踩；真实 DeepSeek 端到端跑通，14 项测试全过。
+> **Day2 已完成**：真实 Qdrant（本地嵌入式）+ 本地 BGE、MySQL 9 表建库、问答落库、会话历史、点赞点踩；真实 DeepSeek 端到端跑通。
+> **Day3（提前）已完成**：校规文档解析入库流水线 + Neo4j 校规图谱，真实三库并行召回已联调；20 项测试全过。
 > 目标：1 周内交付可现场演示的课程答辩系统，之后平滑扩展为正常平台。
+> 注意：MySQL 暂不升级（5.5.11 → 8.0），脚本已兼容两者；升级安排在答辩后。
 
 ## 0. 本机环境复用（不需要 Docker、不需要下载模型）
 
@@ -12,7 +14,7 @@
 | --- | --- | --- | --- |
 | Qdrant | `qdrant-client` 本地嵌入式模式 | `QdrantClient(path=backend/data/qdrant)`，数据落盘 | ✅ 建集合、写入、语义检索通过 |
 | BGE-small-zh | `G:\ai-models\hf\hub\models--BAAI--bge-small-zh-v1.5\snapshots\7999e1d...` | `EMBEDDING_MODEL_PATH` 指向该目录，零下载 | ✅ 512 维，冷启动加载约 2~3 分钟，之后单次检索约 0.05s |
-| Neo4j | `G:\neo4j` · 5.26.30 · `auth_enabled=false` · 空图 | `scripts/start_neo4j.ps1` 使用本机 Java17 启动 | ✅ 已连通并验证可写；图谱数据待 Day5 灌入 |
+| Neo4j | `G:\neo4j` · 5.26.30 · `auth_enabled=false` | `scripts/start_neo4j.ps1` 使用本机 Java17 启动 | ✅ 已灌入样例手册：1 文档 / 8 章节 / 26 条款 / 7 主题 / 74 关系 |
 | MySQL | 本机服务 5.5.11，root 无密码 | `MYSQL_URL` + `school_rules_rag` 库（`sql/init_mysql.sql`） | ✅ 9 张表 + 种子数据（admin/student、6 标签） |
 
 > 注意：`backend/data/` 已加入 `.gitignore`；没有改动你原来 `G:\智能体学习\qdrant_data` 里的课程数据。
@@ -98,6 +100,21 @@ flowchart TD
 | `POST /api/v1/messages/{id}/feedback` | 点赞 / 点踩 |
 | `GET /health` | 健康检查（模式 / 图节点数 / 向量预热状态） |
 
+## 5.1 校规文档入库流水线（已完成）
+
+```text
+rules/*.md|*.txt
+   → rules_parser（识别「第X章」「第N条」，切分为条款）
+   → MySQL：documents + chunks（记录 qdrant_point_id 溯源映射）
+   → BGE-small-zh 向量化
+   → Qdrant：写入 26 个向量点（payload 带文档/章节/条款）
+   → Neo4j：(RuleDocument)-[:HAS_CHAPTER]->(Chapter)-[:HAS_RULE]->(Rule)-[:ABOUT]->(Topic)
+```
+
+命令：`cd backend && python scripts/ingest_rules.py --dir ../rules --reset`
+
+图谱检索方式：问题关键词在 `Rule.content/article/Chapter.title` 上做包含匹配，命中后沿"文档 → 章节 → 条款 → 主题"遍历，返回带路径信息的证据（中文小语料下比全文索引更稳）。
+
 ## 6. 目录
 
 ```text
@@ -112,12 +129,14 @@ backend/
 │   │   ├── runtime.py       # 图引擎（并行 / 选择 / 循环 + trace）
 │   │   ├── graph.py         # 图定义（节点 + 路由）
 │   │   └── nodes.py         # 节点实现 + Prompt
-│   ├── services/            # llm / stores（Qdrant+BGE、Neo4j）/ persistence（MySQL）
+│   ├── services/            # llm / stores（Qdrant+BGE、Neo4j）/ persistence / rules_parser / ingestion
 │   ├── db/                  # models.py（SQLAlchemy）、session.py
-│   └── api/v1/              # chat.py、conversations.py
+│   ├── api/v1/              # chat.py、conversations.py
+│   ├── scripts/             # ingest_rules.py（文档入库命令行）
+│   └── data/                # 本地 Qdrant 数据（gitignore）
 ├── main.py                  # 旧极简版（现场回退）
-├── tests/                   # test_workflow.py + test_mysql_persistence.py
-└── data/                    # 本地 Qdrant 数据（gitignore）
+├── tests/                   # 图引擎 / SSE / MySQL / 解析器 / Neo4j
+└── rules/                   # 校规文档目录（当前为虚构样例）
 ```
 
 ## 7. 排期
@@ -128,6 +147,6 @@ backend/
 | D2 | Qdrant 本地模式 + 本地 BGE 小语料入库；MySQL 9 表 + 落库 + 会话历史 + 反馈 | ✅ 完成 |
 | D3 | Vue3：登录 + 问答（SSE/轨迹/来源/反馈） | ⏳ |
 | D4 | 会话历史前端 + 文档管理（上传/切分/入库）+ 联调 | ⏳ |
-| D5 | Neo4j 校规图谱灌入 + `GRAPH_MODE=neo4j` 联调（服务已在运行） | ⏳ |
+| D5 | Neo4j 校规图谱灌入 + `GRAPH_MODE=neo4j` 联调（服务已在运行） | ✅ 完成（含文档入库流水线，真实三库联调通过） |
 | D6 | 全链路彩排 + 种子数据 + 一键兜底 | ⏳ |
 | D7 | PPT + 实验报告 + 演示视频脚本 | ⏳ |

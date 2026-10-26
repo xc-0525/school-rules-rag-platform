@@ -19,7 +19,7 @@
 
 > **两套可运行版本**：
 > 1. **极简版** [`backend/main.py`](backend/main.py)：单文件 MVP，Mock 双 Agent + DeepSeek 流式，40 项冒烟检查通过；
-> 2. **v2 正式工程** [`backend/app/`](backend/app/)：自研 Agent 图引擎（13 节点 / 并行·选择·循环 / SSE 轨迹）+ 真实 MySQL 落库 + 会话历史 + 真实 Qdrant（本地嵌入式）+ 本地 BGE，**真实 DeepSeek 全链路已跑通**。
+> 2. **v2 正式工程** [`backend/app/`](backend/app/)：自研 Agent 图引擎（13 节点 / 并行·选择·循环 / SSE 轨迹）+ 真实 MySQL 落库 + 会话历史 + 真实 Qdrant（本地嵌入式 + 本地 BGE）+ 真实 Neo4j 图谱 + 真实 DeepSeek，**全链路已端到端跑通**。
 
 | 模块 | 当前状态 | 代码位置 |
 | --- | --- | --- |
@@ -27,28 +27,38 @@
 | v2 Agent 图引擎（13 节点，并行/选择/循环） | ✅ 已完成，SSE 实时输出轨迹 | [`backend/app/agents/`](backend/app/agents/) |
 | v2 真实向量检索（Qdrant 本地嵌入式 + BGE-small-zh） | ✅ 已实测（512 维，检索约 0.05s/次） | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
 | v2 MySQL 落库 / 会话历史 / 点赞点踩 | ✅ 9 张表 + 真实 DeepSeek 全链路通过 | [`backend/app/services/persistence.py`](backend/app/services/persistence.py) |
-| v2 真实 Neo4j 图谱 | 🔄 服务已连通（5.26.30），待灌入校规图谱 | `app/services/stores.py` |
+| v2 真实 Neo4j 图谱 | ✅ 已灌入样例手册（1 文档 / 8 章节 / 26 条款 / 7 主题），双路召回已验证 | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
+| 校规文档入库流水线 | ✅ 解析 → MySQL → BGE → Qdrant → Neo4j（命令行） | [`backend/scripts/ingest_rules.py`](backend/scripts/ingest_rules.py) |
+| 校规样例文档 | ✅ 已提供（虚构样例，替换真实文档后重跑入库即可） | [`rules/学生手册节选.md`](rules/学生手册节选.md) |
 | Vue3 前端（问答 / 轨迹 / 历史 / 文档） | 📋 开发中（D3） | `frontend/`（规划） |
 | 数据库建表脚本 | ✅ 已补齐，兼容 MySQL 5.5 / 8.0 | [`sql/init_mysql.sql`](sql/init_mysql.sql) |
 
-**v2 启动（推荐用于答辩演示）**：
+**答辩演示启动顺序**：
 
-```bash
+```powershell
+# 1) 启动 Neo4j（单独开一个窗口，保持运行）
+powershell -ExecutionPolicy Bypass -File .\scripts\start_neo4j.ps1
+
+# 2) 首次/更新校规文档时入库（BGE 首次加载约 2~3 分钟）
 cd backend
-uvicorn app.main:app --reload --port 8000
+python scripts/ingest_rules.py --dir ../rules --reset
+
+# 3) 启动后端（使用全局 Python；同样需要等 BGE 预热）
+cd ..
+powershell -ExecutionPolicy Bypass -File .\scripts\start_backend.ps1
 # Swagger: http://127.0.0.1:8000/docs
-# 图定义: GET /api/v1/graph    问答: POST /api/v1/chat
 ```
 
-> 当前测试：**14 项自动化测试全过**（图引擎正常/循环/拒答/引用重生成/缓存短路 + SSE + MySQL 落库/历史/反馈）；
-> 真实 DeepSeek（deepseek-chat）+ 真实 MySQL 已完成端到端验证（答案带条款引用、落库 2 条消息、历史可查）。
+> 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
+> 当前测试：**20 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + Neo4j 图谱）；
+> 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
 
 ### ⚠️ 已知限制与待补事项
 
-1. **v2 的 Neo4j 仍是 Mock**：图谱服务已启动并验证可写，但校规图谱数据尚未灌入（D5）；
+1. **校规内容为虚构样例**：`rules/学生手册节选.md` 只用于跑通链路，拿到学校真实文件后替换并重新入库即可；
 2. **Vue3 前端尚未开始**：当前只有 FastAPI + 极简演示页，前端是 D3 任务；
 3. **Swagger UI 中的流式响应是“一次性显示”的**：想看打字机效果请用演示页或 `curl -N`；
-4. 本地 MySQL 是 **5.5.11**（较老），建表脚本已做兼容；升级 8.0 后脚本同样可用。
+4. 本地 MySQL 是 **5.5.11**（较老），脚本已做兼容；答辩后再评估升级 8.0。
 
 ---
 
@@ -373,7 +383,20 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 6.6 前端启动（规划中）
+### 6.6 校规文档入库（真实数据）
+
+1. 把真实校规文档（首版支持 `.md` / `.txt`）放进 `rules/`；
+2. 执行入库，脚本会同时写入 **MySQL documents/chunks、Qdrant 向量、Neo4j 图谱**：
+
+```bash
+cd backend
+python scripts/ingest_rules.py --dir ../rules --reset
+```
+
+> 仓库内 `rules/学生手册节选.md` 是虚构样例，共 26 条，覆盖宿舍 / 考试 / 奖学金 / 请假 / 处分等演示问题。
+> 入库后：MySQL 有 1 份文档 + 26 个分块，Qdrant 有 26 个向量，Neo4j 有 `RuleDocument / Chapter / Rule / Topic` 四类节点共 42 个。
+
+### 6.7 前端启动（规划中）
 
 ```bash
 cd frontend
@@ -398,14 +421,20 @@ school-rules-rag-platform/
 │   │   ├── services/        #   LLM / Qdrant+BGE / Neo4j / MySQL / 语义缓存适配器
 │   │   ├── db/              #   SQLAlchemy 模型与引擎
 │   │   └── schemas/         #   Pydantic 模型
-│   ├── tests/               # ✅ 14 项测试（图引擎 + SSE + MySQL 集成）
+│   ├── tests/               # ✅ 20 项测试（图引擎 + SSE + MySQL + 解析器 + Neo4j）
+│   ├── scripts/
+│   │   └── ingest_rules.py  # ✅ 校规文档入库（MySQL + Qdrant + Neo4j）
 │   └── data/                #   本地 Qdrant 数据（已 gitignore）
+├── rules/                   # ✅ 校规文档目录（当前为虚构样例，替换为真实文件）
+│   ├── 学生手册节选.md
+│   └── README.md
 ├── frontend/                # 📋 Vue3 前端（D3 开发中）
 ├── sql/
 │   └── init_mysql.sql       # ✅ 建表 + 种子数据（兼容 MySQL 5.5 / 8.0）
 ├── scripts/
 │   ├── start_neo4j.ps1      # ✅ 启动本机 Neo4j
-│   └── start_neo4j.cmd
+│   ├── start_neo4j.cmd
+│   └── start_backend.ps1    # ✅ 一键启动 v2（真实 Qdrant + Neo4j + DeepSeek）
 ├── docs/
 │   └── architecture-v2.md   # ✅ v2 架构 / 图设计 / 排期
 ├── LICENSE
@@ -423,15 +452,16 @@ school-rules-rag-platform/
 - **v2 正式工程（课程答辩版）**：
   - 自研 Agent 图引擎：13 节点，支持并行 / 选择 / 循环，SSE 实时输出节点轨迹；
   - 真实 Qdrant（本地嵌入式）+ 本地 BGE-small-zh 检索；
+  - 真实 Neo4j 校规图谱（文档 → 章节 → 条款 → 主题），与向量检索并行双路召回；
+  - 校规文档入库流水线：解析切分 → MySQL 记录 → BGE 向量 → Qdrant → Neo4j；
   - 真实 MySQL 落库 + 会话历史 + 点赞点踩 API；
   - 真实 DeepSeek（deepseek-chat）端到端跑通；
-  - 14 项自动化测试全过
+  - 20 项自动化测试全过
 
 ### 🚧 进行中
 
-- 校规图谱灌入 Neo4j + `GRAPH_MODE=neo4j` 联调
 - Vue3 前端：问答（SSE / Agent 轨迹 / 来源引用 / 反馈）+ 会话历史 + 文档管理
-- 文档上传 → 解析切分 → BGE 向量入库 → Qdrant 的完整入库流水线
+- 文档上传 API（当前入库走命令行，D4 改为接口上传）
 
 ### 📋 后续计划
 
@@ -439,6 +469,7 @@ school-rules-rag-platform/
 - 证据约束生成评测（命中率、拒答准确率、响应延迟）
 - 高频问题语义缓存（接入 Qdrant）
 - 文档管理后台、标签、公告模块
+- 真实校规文档替换 `rules/` 样例并重新入库
 - 答辩材料：PPT、实验报告、演示视频
 
 ## 九、开源协议
