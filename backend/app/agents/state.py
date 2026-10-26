@@ -15,7 +15,7 @@ class AgentState(BaseModel):
     """一次问答在 Agent 图中的完整状态。"""
 
     query: str
-    conversation_id: str | None = None
+    conversation_id: int | None = None
 
     # ---- 查询理解 ----
     intent: str = ""
@@ -42,3 +42,4 @@ class AgentState(BaseModel):
 
     # ---- 运行信息 ----
     steps: int = 0
+    latency_ms: int = 0

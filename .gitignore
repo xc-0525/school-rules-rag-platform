@@ -157,6 +157,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# v2 本地数据（Qdrant 嵌入式数据、上传文档、BGE 缓存等）
+backend/data/
+
 # Spyder project settings
 .spyderproject
 .spyproject

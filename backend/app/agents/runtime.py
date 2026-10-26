@@ -113,6 +113,7 @@ class WorkflowEngine:
                     f"工作流步数超过上限 {self.settings.max_steps}，疑似死循环（请检查路由）"
                 )
 
+            state.latency_ms = self._ms()
             update = await self._execute(spec, state)
             if update:
                 state = state.model_copy(update=update)

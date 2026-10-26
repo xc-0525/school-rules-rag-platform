@@ -61,6 +61,8 @@ class Settings:
     mysql_url: str = ""
     qdrant_path: str = ""
     qdrant_url: str = ""
+    qdrant_collection: str = "rules_chunks"
+    embedding_model_path: str = ""
     neo4j_uri: str = ""
     neo4j_user: str = "neo4j"
     neo4j_password: str = ""
@@ -83,6 +85,8 @@ class Settings:
             mysql_url=os.getenv("MYSQL_URL", "").strip(),
             qdrant_path=os.getenv("QDRANT_PATH", "").strip(),
             qdrant_url=os.getenv("QDRANT_URL", "").strip(),
+            qdrant_collection=os.getenv("QDRANT_COLLECTION", "rules_chunks").strip(),
+            embedding_model_path=os.getenv("EMBEDDING_MODEL_PATH", "").strip(),
             neo4j_uri=os.getenv("NEO4J_URI", "").strip(),
             neo4j_user=os.getenv("NEO4J_USER", "neo4j").strip(),
             neo4j_password=os.getenv("NEO4J_PASSWORD", "").strip(),

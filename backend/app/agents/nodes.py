@@ -200,7 +200,7 @@ async def degrade_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
 
 
 async def persist_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
-    await ctx.services.persistence.save_qa(state)
+    conversation_id = await ctx.services.persistence.save_qa(state)
     if not state.cached and not state.refused and state.answer:
         ctx.services.cache.store(state.query, state.answer, state.sources)
-    return {}
+    return {"conversation_id": conversation_id}

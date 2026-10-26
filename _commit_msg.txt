@@ -1,0 +1,11 @@
+feat: Day2 真实存储接入（MySQL 落库 + 会话历史 + Qdrant/BGE）
+
+- MySQL：sql/init_mysql.sql（兼容 5.5/8.0，9 张表 + 种子账号/标签）
+  + SQLAlchemy 模型 + MySQLPersistence（自动建会话、落 user/assistant 消息）
+- API：会话列表/详情、消息点赞点踩；问答自动落库，返回 conversation_id
+- 存储适配器：真实 Qdrant 本地嵌入式模式 + 本地 BGE-small-zh 向量检索
+- 启动预热：VECTOR_MODE=qdrant 时加载 BGE 并建种子集合
+- 密码哈希：PBKDF2-SHA256（标准库实现）
+- Neo4j 启动脚本（纯 ASCII 版，修复 Windows PowerShell 5.1 编码问题）
+- 真实 DeepSeek(deepseek-chat) 全链路验证；14 项测试全过
+- README / docs/architecture-v2.md 同步更新

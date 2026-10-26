@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
@@ -13,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.agents.graph import build_graph
 from app.api.v1.chat import build_router
+from app.api.v1.conversations import build_router as build_conversations_router
 from app.core.config import Settings
 from app.services.container import Services, build_services
 
@@ -23,9 +26,28 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     services = services or build_services(settings)
     nodes, entry = build_graph(settings)
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """启动预热：真实 Qdrant 模式下提前加载 BGE 模型 + 建好种子集合。
+
+        BGE 首次加载约 1~2 分钟，预热后问答才不会被首次加载拖慢。
+        """
+        if settings.vector_mode == "qdrant":
+            try:
+                await asyncio.to_thread(services.vector.ensure_ready)
+                app.state.vector_ready = True
+                print("[startup] 向量服务就绪：Qdrant 本地嵌入式 + 本地 BGE")
+            except Exception as exc:  # noqa: BLE001
+                app.state.vector_ready = False
+                print(f"[startup] 向量服务初始化失败：{exc}")
+        else:
+            app.state.vector_ready = True
+        yield
+
     app = FastAPI(
         title=f"{settings.app_name} · v2",
         version=settings.version,
+        lifespan=lifespan,
         description=(
             "**自研 Agent 图引擎**：10+ 节点，支持并行 / 选择 / 循环三种控制结构，"
             "每个节点执行通过 SSE `trace` 事件实时输出。\n\n"
@@ -47,6 +69,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     )
 
     app.include_router(build_router(services, settings, nodes, entry))
+    app.include_router(build_conversations_router(services))
 
     @app.get("/health", tags=["运维"], summary="健康检查")
     async def health() -> dict[str, Any]:
@@ -57,8 +80,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                 "vector": settings.vector_mode,
                 "graph": settings.graph_mode,
                 "llm": settings.llm_mode,
+                "persistence": "mysql" if settings.mysql_url else "mock",
             },
             "llm_configured": settings.llm_configured,
+            "vector_ready": getattr(app.state, "vector_ready", None),
             "graph": {
                 "node_count": len(nodes),
                 "agent_node_count": sum(1 for spec in nodes.values() if spec.kind == "agent"),

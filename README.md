@@ -15,44 +15,40 @@
 
 ---
 
-## 📌 当前进度（2026-10-25 更新）
+## 📌 当前进度（2026-10-26 更新）
 
-> **最小可演示闭环（MVP）已跑通** —— 一条 `POST /chat` 请求即可完成：
-> **检索 Agent（Mock Qdrant）+ 图谱 Agent（Mock Neo4j）并行召回 → 多路证据融合 → 防幻觉拒答 → DeepSeek 真实流式生成（SSE）→ MySQL 落库（Mock）**。
-> 全程**无需安装 MySQL / Qdrant / Neo4j**，只要有 Python 3.10+ 和 DeepSeek API Key，今晚就能演示。
+> **两套可运行版本**：
+> 1. **极简版** [`backend/main.py`](backend/main.py)：单文件 MVP，Mock 双 Agent + DeepSeek 流式，40 项冒烟检查通过；
+> 2. **v2 正式工程** [`backend/app/`](backend/app/)：自研 Agent 图引擎（13 节点 / 并行·选择·循环 / SSE 轨迹）+ 真实 MySQL 落库 + 会话历史 + 真实 Qdrant（本地嵌入式）+ 本地 BGE，**真实 DeepSeek 全链路已跑通**。
 
 | 模块 | 当前状态 | 代码位置 |
 | --- | --- | --- |
-| 极简版主循环 `POST /chat` | ✅ 已完成，可直接运行 | [`backend/main.py`](backend/main.py) |
-| 检索 Agent（模拟 Qdrant 向量召回） | ✅ Mock | `agent_retrieve()` |
-| 图谱 Agent（模拟 Neo4j 多跳推理） | ✅ Mock | `agent_graph()` |
-| 多路证据融合 + 来源引用 | ✅ 已完成 | `fuse_evidence()` / `build_sources()` |
-| 防幻觉校验（无证据直接拒答，不调大模型） | ✅ 已完成 | `/chat` 内分支 |
-| DeepSeek 证据约束生成（SSE 流式） | ✅ 真实调用，异常已兜底 | `agent_generate()` |
-| MySQL 问答记录落库 | 🚧 Mock（`print` 模拟） | `save_to_mysql()` |
-| 浏览器流式演示页 | ✅ 已完成（无需前端构建） | [`backend/demo.html`](backend/demo.html) |
-| 真实 MySQL / Qdrant / Neo4j 接入 | 📋 待开发 | 规划中的 `backend/app/` |
-| Vue3 前端（流式问答 / 来源展示） | 📋 待开发 | 规划中的 `frontend/` |
+| 极简版主循环 `POST /chat` | ✅ 可直接运行 | [`backend/main.py`](backend/main.py) |
+| v2 Agent 图引擎（13 节点，并行/选择/循环） | ✅ 已完成，SSE 实时输出轨迹 | [`backend/app/agents/`](backend/app/agents/) |
+| v2 真实向量检索（Qdrant 本地嵌入式 + BGE-small-zh） | ✅ 已实测（512 维，检索约 0.05s/次） | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
+| v2 MySQL 落库 / 会话历史 / 点赞点踩 | ✅ 9 张表 + 真实 DeepSeek 全链路通过 | [`backend/app/services/persistence.py`](backend/app/services/persistence.py) |
+| v2 真实 Neo4j 图谱 | 🔄 服务已连通（5.26.30），待灌入校规图谱 | `app/services/stores.py` |
+| Vue3 前端（问答 / 轨迹 / 历史 / 文档） | 📋 开发中（D3） | `frontend/`（规划） |
+| 数据库建表脚本 | ✅ 已补齐，兼容 MySQL 5.5 / 8.0 | [`sql/init_mysql.sql`](sql/init_mysql.sql) |
 
-**启动三步**（完整说明见下文 [6.2 极简版 Demo](#62-极简版-demo当前可运行--无需任何数据库)）：
+**v2 启动（推荐用于答辩演示）**：
 
 ```bash
 cd backend
-pip install -r requirements.txt
-copy .env.example .env          # 填入 DEEPSEEK_API_KEY（Linux/macOS 用 cp）
-uvicorn main:app --reload --port 8000
-# Swagger UI: http://127.0.0.1:8000/docs    流式演示页: http://127.0.0.1:8000/
+uvicorn app.main:app --reload --port 8000
+# Swagger: http://127.0.0.1:8000/docs
+# 图定义: GET /api/v1/graph    问答: POST /api/v1/chat
 ```
 
-> 已完成 **40 项本地冒烟检查**（正常问答 / 流式事件顺序 / 无证据拒答 / 未配置 Key / Key 无效 / 连接失败 / Prompt 证据约束 / Swagger 与演示页）。
-> 大模型调用链路是用**本地 OpenAI 兼容 Mock 服务**验证的（不消耗额度），真实 DeepSeek 的回答效果需填入自己的 Key 后确认。
+> 当前测试：**14 项自动化测试全过**（图引擎正常/循环/拒答/引用重生成/缓存短路 + SSE + MySQL 落库/历史/反馈）；
+> 真实 DeepSeek（deepseek-chat）+ 真实 MySQL 已完成端到端验证（答案带条款引用、落库 2 条消息、历史可查）。
 
 ### ⚠️ 已知限制与待补事项
 
-1. **MySQL / Qdrant / Neo4j 均为 Mock**：当前只验证编排与生成链路，不代表真实召回的准确率；
-2. **`sql/init_mysql.sql` 尚未提交到本仓库**：第五章的建表设计已完成，但脚本文件目前不在仓库中，接入真实 MySQL 前需要补上；
-3. **Swagger UI 中的流式响应是“一次性显示”的**：浏览器内看不到打字机效果，演示流式请用 <http://127.0.0.1:8000/> 演示页或 `curl -N`；
-4. 尚无鉴权、多轮会话、语义缓存与前端工程，这些属于下一阶段。
+1. **v2 的 Neo4j 仍是 Mock**：图谱服务已启动并验证可写，但校规图谱数据尚未灌入（D5）；
+2. **Vue3 前端尚未开始**：当前只有 FastAPI + 极简演示页，前端是 D3 任务；
+3. **Swagger UI 中的流式响应是“一次性显示”的**：想看打字机效果请用演示页或 `curl -N`；
+4. 本地 MySQL 是 **5.5.11**（较老），建表脚本已做兼容；升级 8.0 后脚本同样可用。
 
 ---
 
@@ -196,18 +192,18 @@ erDiagram
 | 8 | `document_tags` | 文档标签表 | `name` 唯一（学籍管理、违纪处分等） |
 | 9 | `document_tag_relations` | 文档-标签关联表（多对多） | `document_id` + `tag_id` 联合唯一 |
 
-> 建表脚本（规划）：`sql/init_mysql.sql`（MySQL 8.0+，utf8mb4 / InnoDB，含外键级联策略与索引设计）。
-> ⚠️ 该脚本目前尚未提交到本仓库，接入真实 MySQL 前需补齐；极简版 Demo 不依赖它。
+> 建表脚本：`sql/init_mysql.sql`（兼容 MySQL 5.5+ / 8.0，utf8mb4 / InnoDB，含外键级联、索引与种子数据）。
+> 已在本地 MySQL 5.5.11 上实测通过（9 张表 + 2 个账号 + 6 个标签）。
 
 ### 5.4 初始化数据
 
-- 默认管理员账号：`admin` / `admin123`（bcrypt 哈希存储，**上线前请务必修改密码**）
+- 默认账号：`admin` / `admin123`（管理员）、`student` / `student123`（学生）；密码为 PBKDF2-SHA256 哈希（见 `app/core/security.py`），**上线前请务必修改密码**
 - 默认文档标签：学籍管理、违纪处分、奖助学金、宿舍管理、教学管理、校园安全
 
 ## 六、快速开始
 
-> 项目处于开发阶段。**当前唯一可运行的代码是「极简版 Demo」（6.2 节）**，不需要安装任何数据库；
-> 6.3 节之后是完整版（三库 + 前端）的规划与启动方式，相关代码尚未落地。
+> 项目现在有**两套可运行版本**：6.2 的极简版（零数据库依赖）和 6.3 起的 v2 正式工程（真实 MySQL + Qdrant/BGE，Neo4j 待接入）。
+> 答辩演示建议用 v2；现场若外部依赖异常，可随时切回极简版或把 v2 切到 Mock 模式。
 
 ### 6.1 环境要求
 
@@ -312,34 +308,63 @@ curl -N -X POST http://127.0.0.1:8000/chat \
 | 请假三天以上怎么审批？ | 命中考勤条款，正常作答 |
 | 今天天气怎么样？ | `evidence_found=false`，直接拒答且**不调用大模型** |
 
-### 6.3 初始化 MySQL（完整版 · 规划中）
+### 6.3 初始化 MySQL（v2 正式工程）
 
-> 下列命令依赖尚未提交的 `sql/init_mysql.sql` 与规划中的 `backend/app/`，当前仅作设计参考。
-
-```bash
-# 创建数据库 school_rules_rag 并建表、写入初始数据
-mysql -u root -p < sql/init_mysql.sql
-```
-
-### 6.4 启动 Qdrant / Neo4j（完整版 · Docker）
+> 脚本已就绪并通过本机 MySQL 5.5.11 实测；MySQL 8.0 同样兼容。
 
 ```bash
-docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant
-docker run -d --name neo4j -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/yourpassword neo4j:5
+# 创建数据库 school_rules_rag、建 9 张表并写入种子账号/标签
+mysql -u root -p --default-character-set=utf8mb4 < sql/init_mysql.sql
 ```
 
-### 6.5 完整版后端配置（规划中）
+然后在 `backend/.env` 中配置：
 
 ```env
-MYSQL_URL=mysql+pymysql://root:password@127.0.0.1:3306/school_rules_rag
+MYSQL_URL=mysql+pymysql://root:你的密码@127.0.0.1:3306/school_rules_rag?charset=utf8mb4
+```
+
+### 6.4 启动 Qdrant / Neo4j（本机原生 · 不需要 Docker）
+
+本项目不使用 Docker：
+
+- **Qdrant**：用 `qdrant-client` 的本地嵌入式模式，数据落在 `backend/data/qdrant`，无需启动服务；
+- **BGE-small-zh**：直接读取本机缓存模型（`.env` 的 `EMBEDDING_MODEL_PATH`），无需下载；
+- **Neo4j**：本机原生 5.26.30 + Java17，用脚本启动：
+
+```powershell
+# 前台运行，演示期间保持窗口打开；另开一个窗口跑后端
+powershell -ExecutionPolicy Bypass -File .\scripts\start_neo4j.ps1
+# 或
+.\scripts\start_neo4j.cmd
+```
+
+启动后 bolt：`127.0.0.1:7687`（本机配置已关闭认证），浏览器控制台：<http://127.0.0.1:7474>。
+
+### 6.5 v2 后端配置（完整 `.env` 参考）
+
+```env
+# 运行模式：mock | qdrant / mock | neo4j / deepseek | fake
+VECTOR_MODE=qdrant
+GRAPH_MODE=neo4j
+LLM_MODE=deepseek
+
+# MySQL
+MYSQL_URL=mysql+pymysql://root:你的密码@127.0.0.1:3306/school_rules_rag?charset=utf8mb4
+
+# Qdrant 本地嵌入式 + 本机 BGE 模型
+QDRANT_PATH=./data/qdrant
+QDRANT_COLLECTION=rules_chunks
+EMBEDDING_MODEL_PATH=G:\ai-models\hf\hub\models--BAAI--bge-small-zh-v1.5\snapshots\7999e1d3359715c523056ef9478215996d62a620
+
+# Neo4j（本机已关闭认证）
 NEO4J_URI=bolt://127.0.0.1:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=yourpassword
-QDRANT_URL=http://127.0.0.1:6333
-EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+NEO4J_USER=
+NEO4J_PASSWORD=
+
+# DeepSeek
 DEEPSEEK_API_KEY=sk-xxxx
 DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
 ```
 
 ```bash
@@ -361,21 +386,28 @@ npm run dev
 ```text
 school-rules-rag-platform/
 ├── backend/
-│   ├── main.py              # ✅ 极简版主循环（当前唯一可运行代码）
-│   ├── requirements.txt     # ✅ 极简版依赖（FastAPI / Uvicorn / openai / pydantic / python-dotenv）
-│   ├── .env.example         # ✅ 环境变量模板（复制为 .env 后填 DeepSeek Key）
-│   ├── demo.html            # ✅ 浏览器流式演示页（由 GET / 返回）
-│   └── app/                 # 📋 完整版工程结构（规划中）
-│       ├── agents/          # 检索 / 图谱 / 生成智能体与编排
-│       ├── api/             # 路由（鉴权、会话、文档、问答 SSE）
-│       ├── core/            # 配置、安全、日志
-│       ├── db/              # MySQL / Qdrant / Neo4j 连接管理
-│       ├── models/          # SQLAlchemy ORM 模型
-│       ├── schemas/         # Pydantic 模型
-│       └── services/        # 文档解析切分、向量入库、语义缓存
-├── frontend/                # 📋 Vue3 前端（待开发）
+│   ├── main.py              # ✅ 极简版单文件（现场回退方案）
+│   ├── demo.html            # ✅ 极简版浏览器演示页
+│   ├── requirements.txt     # ✅ 依赖
+│   ├── .env.example         # ✅ 环境变量模板（v2 开关 / 三库 / DeepSeek）
+│   ├── app/                 # ✅ v2 正式工程
+│   │   ├── main.py          #   应用工厂 + 启动预热 + /health
+│   │   ├── core/            #   配置 / 密码哈希
+│   │   ├── agents/          #   图引擎 + 图定义 + 11 节点 + SSE 事件
+│   │   ├── api/v1/          #   chat / conversations（会话历史、反馈）
+│   │   ├── services/        #   LLM / Qdrant+BGE / Neo4j / MySQL / 语义缓存适配器
+│   │   ├── db/              #   SQLAlchemy 模型与引擎
+│   │   └── schemas/         #   Pydantic 模型
+│   ├── tests/               # ✅ 14 项测试（图引擎 + SSE + MySQL 集成）
+│   └── data/                #   本地 Qdrant 数据（已 gitignore）
+├── frontend/                # 📋 Vue3 前端（D3 开发中）
 ├── sql/
-│   └── init_mysql.sql       # 📋 MySQL 建表与初始化脚本（待补提交）
+│   └── init_mysql.sql       # ✅ 建表 + 种子数据（兼容 MySQL 5.5 / 8.0）
+├── scripts/
+│   ├── start_neo4j.ps1      # ✅ 启动本机 Neo4j
+│   └── start_neo4j.cmd
+├── docs/
+│   └── architecture-v2.md   # ✅ v2 架构 / 图设计 / 排期
 ├── LICENSE
 └── README.md
 ```
@@ -385,24 +417,29 @@ school-rules-rag-platform/
 ### ✅ 已完成
 
 - 系统总体架构设计：MySQL + Neo4j + Qdrant 多库混合存储方案
-- MySQL 数据库设计：9 张表、外键与索引、`qdrant_point_id` 映射与溯源链路
+- MySQL 数据库设计：9 张表、外键与索引、`qdrant_point_id` 映射与溯源链路；建表脚本已落地并通过 5.5.11 实测
 - Neo4j 图谱本体（Ontology）设计
-- **多智能体问答最小闭环（可运行）**：检索 / 图谱 Agent 并行召回（Mock）+ 多路证据融合 + 防幻觉拒答 + DeepSeek 证据约束流式生成（SSE）+ MySQL Mock 落库
-- 配套工程化：Swagger 文档、`/health` 健康检查、浏览器流式演示页、40 项本地冒烟检查
+- **极简版多智能体闭环**：检索 / 图谱 Agent 并行召回（Mock）+ 证据融合 + 防幻觉拒答 + DeepSeek 流式生成 + MySQL Mock 落库
+- **v2 正式工程（课程答辩版）**：
+  - 自研 Agent 图引擎：13 节点，支持并行 / 选择 / 循环，SSE 实时输出节点轨迹；
+  - 真实 Qdrant（本地嵌入式）+ 本地 BGE-small-zh 检索；
+  - 真实 MySQL 落库 + 会话历史 + 点赞点踩 API；
+  - 真实 DeepSeek（deepseek-chat）端到端跑通；
+  - 14 项自动化测试全过
 
 ### 🚧 进行中
 
-- 用真实 MySQL / Qdrant / Neo4j 替换现有 Mock（迁移到 `backend/app/` 工程结构）
-- 文档解析切分与 BGE-small-zh 向量入库
-- 打通"图谱 + 向量"双路真实召回链路
+- 校规图谱灌入 Neo4j + `GRAPH_MODE=neo4j` 联调
+- Vue3 前端：问答（SSE / Agent 轨迹 / 来源引用 / 反馈）+ 会话历史 + 文档管理
+- 文档上传 → 解析切分 → BGE 向量入库 → Qdrant 的完整入库流水线
 
 ### 📋 后续计划
 
-- 证据约束生成的评测（命中率、拒答准确率、响应延迟）
-- 高频问题语义缓存
-- Vue3 前端与 SSE 流式问答、来源引用展示
-- 文档管理后台、反馈、标签与公告模块
-- 补齐 `sql/init_mysql.sql` 建表脚本并完成三库联调
+- 登录鉴权与角色权限（学生 / 管理员）
+- 证据约束生成评测（命中率、拒答准确率、响应延迟）
+- 高频问题语义缓存（接入 Qdrant）
+- 文档管理后台、标签、公告模块
+- 答辩材料：PPT、实验报告、演示视频
 
 ## 九、开源协议
 

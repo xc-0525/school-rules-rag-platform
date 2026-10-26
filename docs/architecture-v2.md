@@ -1,7 +1,21 @@
 # v2 架构设计（课程答辩版）
 
 > 状态：**Day1 已完成**（图引擎 + 10+ 节点 + SSE 轨迹 + Mock 适配器）
+> **Day2 已完成**：真实 Qdrant（本地嵌入式）+ 本地 BGE、MySQL 9 表建库、问答落库、会话历史、点赞点踩；真实 DeepSeek 端到端跑通，14 项测试全过。
 > 目标：1 周内交付可现场演示的课程答辩系统，之后平滑扩展为正常平台。
+
+## 0. 本机环境复用（不需要 Docker、不需要下载模型）
+
+调试时发现本机已具备完整的真实链路环境，直接复用（全部原生/嵌入式，与 Docker 无关）：
+
+| 组件 | 位置 / 版本 | 用法 | 实测 |
+| --- | --- | --- | --- |
+| Qdrant | `qdrant-client` 本地嵌入式模式 | `QdrantClient(path=backend/data/qdrant)`，数据落盘 | ✅ 建集合、写入、语义检索通过 |
+| BGE-small-zh | `G:\ai-models\hf\hub\models--BAAI--bge-small-zh-v1.5\snapshots\7999e1d...` | `EMBEDDING_MODEL_PATH` 指向该目录，零下载 | ✅ 512 维，冷启动加载约 2~3 分钟，之后单次检索约 0.05s |
+| Neo4j | `G:\neo4j` · 5.26.30 · `auth_enabled=false` · 空图 | `scripts/start_neo4j.ps1` 使用本机 Java17 启动 | ✅ 已连通并验证可写；图谱数据待 Day5 灌入 |
+| MySQL | 本机服务 5.5.11，root 无密码 | `MYSQL_URL` + `school_rules_rag` 库（`sql/init_mysql.sql`） | ✅ 9 张表 + 种子数据（admin/student、6 标签） |
+
+> 注意：`backend/data/` 已加入 `.gitignore`；没有改动你原来 `G:\智能体学习\qdrant_data` 里的课程数据。
 
 ## 1. 答辩要求 → 实现映射
 
@@ -73,24 +87,37 @@ flowchart TD
 | `done` | 完整答案、来源、`refused/degraded/cached`、`runtime`（步数 / 访问节点 / 循环次数） |
 | `error` | 终止错误 |
 
+### REST 接口（Day2 已实现）
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/v1/chat` | 多智能体问答（`stream=true` SSE；`stream=false` JSON） |
+| `GET /api/v1/graph` | Agent 图定义（节点 / 边 / 控制结构），供前端画图 |
+| `GET /api/v1/conversations` | 会话列表（含消息数） |
+| `GET /api/v1/conversations/{id}` | 会话详情（完整消息 + 来源引用） |
+| `POST /api/v1/messages/{id}/feedback` | 点赞 / 点踩 |
+| `GET /health` | 健康检查（模式 / 图节点数 / 向量预热状态） |
+
 ## 6. 目录
 
 ```text
 backend/
 ├── app/
-│   ├── main.py              # 应用工厂 + CORS + /health
-│   ├── core/config.py       # Settings（模式开关 / 编排参数 / 三库配置）
-│   ├── schemas/chat.py      # ChatRequest / ChatResponse / Evidence / SourceItem
+│   ├── main.py              # 应用工厂 + CORS + /health + 启动预热
+│   ├── core/                # config.py（模式开关）、security.py（PBKDF2 密码哈希）
+│   ├── schemas/             # chat.py / conversation.py（Pydantic）
 │   ├── agents/
 │   │   ├── state.py         # AgentState
 │   │   ├── events.py        # EventBus（SSE 事件总线）
 │   │   ├── runtime.py       # 图引擎（并行 / 选择 / 循环 + trace）
 │   │   ├── graph.py         # 图定义（节点 + 路由）
 │   │   └── nodes.py         # 节点实现 + Prompt
-│   ├── services/            # Mock/真实适配器：llm / stores / persistence
-│   └── api/v1/chat.py       # /api/v1/chat、/api/v1/graph
+│   ├── services/            # llm / stores（Qdrant+BGE、Neo4j）/ persistence（MySQL）
+│   ├── db/                  # models.py（SQLAlchemy）、session.py
+│   └── api/v1/              # chat.py、conversations.py
 ├── main.py                  # 旧极简版（现场回退）
-└── tests/test_workflow.py   # 11 项图 + API 测试
+├── tests/                   # test_workflow.py + test_mysql_persistence.py
+└── data/                    # 本地 Qdrant 数据（gitignore）
 ```
 
 ## 7. 排期
@@ -98,9 +125,9 @@ backend/
 | 天 | 内容 | 状态 |
 | --- | --- | --- |
 | D1 | 图引擎 + 10+ 节点 + SSE trace + Mock 适配器 + 测试 | ✅ 完成 |
-| D2 | MySQL 真落库（会话/消息/反馈）+ 历史 API；Qdrant 本地模式 + BGE 小语料 | ⏳ |
+| D2 | Qdrant 本地模式 + 本地 BGE 小语料入库；MySQL 9 表 + 落库 + 会话历史 + 反馈 | ✅ 完成 |
 | D3 | Vue3：登录 + 问答（SSE/轨迹/来源/反馈） | ⏳ |
-| D4 | 会话历史 + 文档管理（上传/切分/入库）+ 联调 | ⏳ |
-| D5 | Neo4j 真图（本地 Community）或 Mock 兜底 | ⏳ |
+| D4 | 会话历史前端 + 文档管理（上传/切分/入库）+ 联调 | ⏳ |
+| D5 | Neo4j 校规图谱灌入 + `GRAPH_MODE=neo4j` 联调（服务已在运行） | ⏳ |
 | D6 | 全链路彩排 + 种子数据 + 一键兜底 | ⏳ |
 | D7 | PPT + 实验报告 + 演示视频脚本 | ⏳ |

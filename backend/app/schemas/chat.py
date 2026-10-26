@@ -12,7 +12,7 @@ class ChatRequest(BaseModel):
 
     query: str = Field(..., min_length=1, max_length=500, description="学生问题", examples=["宿舍晚上几点熄灯？"])
     stream: bool = Field(default=True, description="True=SSE 流式（含 Agent 轨迹）；False=一次性 JSON")
-    conversation_id: str | None = Field(default=None, description="多轮会话 ID，首轮留空")
+    conversation_id: int | None = Field(default=None, description="多轮会话 ID，首轮留空")
 
 
 class Evidence(BaseModel):
@@ -43,5 +43,5 @@ class ChatResponse(BaseModel):
     refused: bool = False
     degraded: bool = False
     cached: bool = False
-    conversation_id: str | None = None
+    conversation_id: int | None = None
     runtime: dict[str, Any] = Field(default_factory=dict, description="图引擎运行信息（步数/节点/循环次数）")
