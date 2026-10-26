@@ -517,14 +517,14 @@ school-rules-rag-platform/
   - 校规文档入库流水线：解析切分 → MySQL 记录 → BGE 向量 → Qdrant → Neo4j；支持命令行批量入库与 HTTP 上传接口；
   - 真实 MySQL 落库 + 会话历史 + 点赞点踩 API；
   - 真实 DeepSeek（deepseek-chat）端到端跑通；
-  - 22 项自动化测试全过
   - PDF 文字版上传（base64）+ 扫描件 OCR 自动回退（装 OCR 引擎后生效）
   - 28 项自动化测试全过
 
 ### 🚧 进行中
 
 - Vue3 前端：问答（SSE / Agent 轨迹 / 来源引用 / 反馈）+ 会话历史 + 文档管理（上传页对接 `/api/v1/documents/upload`）
-- PDF / DOCX 解析与 multipart 上传（需安装 python-multipart）
+- 扫描件 OCR 实测与人工校对流程（OCR 代码已就绪，待安装引擎后验证）
+- DOCX 解析、标准 multipart 文件上传（安装 python-multipart 后自动启用）
 
 ### 📋 后续计划
 
