@@ -29,7 +29,7 @@
 | v2 MySQL 落库 / 会话历史 / 点赞点踩 | ✅ 9 张表 + 真实 DeepSeek 全链路通过 | [`backend/app/services/persistence.py`](backend/app/services/persistence.py) |
 | v2 真实 Neo4j 图谱 | ✅ 已灌入样例手册（1 文档 / 8 章节 / 26 条款 / 7 主题），双路召回已验证 | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
 | 校规文档入库流水线 | ✅ 解析 → MySQL → BGE → Qdrant → Neo4j（命令行 + 上传接口） | [`backend/scripts/ingest_rules.py`](backend/scripts/ingest_rules.py) |
-| 文档上传 / 列表 / 详情 / 删除 API | ✅ `POST /api/v1/documents/upload` 等，上传即入库 | [`backend/app/api/v1/documents.py`](backend/app/api/v1/documents.py) |
+| 文档上传 / 列表 / 详情 / 删除 API | ✅ `.md/.txt` + 文字版 PDF（base64）；扫描件自动走 OCR（装引擎后） | [`backend/app/api/v1/documents.py`](backend/app/api/v1/documents.py) |
 | 校规样例文档 | ✅ 已提供（虚构样例，替换真实文档后重跑入库即可） | [`rules/学生手册节选.md`](rules/学生手册节选.md) |
 | Vue3 前端（问答 / 轨迹 / 历史 / 文档） | 📋 开发中（D3） | `frontend/`（规划） |
 | 数据库建表脚本 | ✅ 已补齐，兼容 MySQL 5.5 / 8.0 | [`sql/init_mysql.sql`](sql/init_mysql.sql) |
@@ -51,15 +51,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_backend.ps1
 ```
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
-> 当前测试：**22 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + Neo4j 图谱 + 上传接口参数校验）；
+> 当前测试：**28 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验）；
 > 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
 
 ### ⚠️ 已知限制与待补事项
 
 1. **校规内容为虚构样例**：`rules/学生手册节选.md` 只用于跑通链路，拿到学校真实文件后替换并重新入库即可；
-2. **Vue3 前端尚未开始**：当前只有 FastAPI + 极简演示页，前端是 D3 任务；
-3. **Swagger UI 中的流式响应是“一次性显示”的**：想看打字机效果请用演示页或 `curl -N`；
-4. 本地 MySQL 是 **5.5.11**（较老），脚本已做兼容；答辩后再评估升级 8.0。
+2. **扫描件 PDF 需要 OCR 引擎**：OCR 代码已接入（上传空白文字层 PDF 时会自动尝试），但本机尚未安装
+   OCR 引擎；执行 `pip install rapidocr_onnxruntime pillow` 后自动生效；
+3. **Vue3 前端尚未开始**：当前只有 FastAPI + 极简演示页，前端是 D3 任务；
+4. **Swagger UI 中的流式响应是“一次性显示”的**：想看打字机效果请用演示页或 `curl -N`；
+5. 本地 MySQL 是 **5.5.11**（较老），脚本已做兼容；答辩后再评估升级 8.0。
 
 ---
 
@@ -388,23 +390,60 @@ uvicorn app.main:app --reload --port 8000
 
 **方式一：上传接口（推荐，后端运行时使用）**
 
-`POST /api/v1/documents/upload`（JSON 文本上传，无需 python-multipart）：
+`POST /api/v1/documents/upload`（JSON 上传，默认**不需要任何新依赖**）：
+
+| 文件类型 | 请求字段 | 依赖 |
+| --- | --- | --- |
+| `.md` / `.txt` | `content`（UTF-8 文本） | 无 |
+| `.pdf`（文字版） | `content_base64`（文件 base64） | PyMuPDF（本机已装 ✅，零额外安装） |
+| `.pdf`（扫描件） | 同上，自动尝试 OCR | 需额外安装 OCR 引擎（见下表） |
 
 ```bash
+# .md / .txt 文本
 curl -X POST http://127.0.0.1:8000/api/v1/documents/upload \
   -H "Content-Type: application/json" \
-  -d '{
-    "filename": "校园服务指南.md",
-    "content": "# XX大学校园服务指南\n\n## 第一章 图书馆服务\n\n第1条 图书馆开放时间……",
-    "title": "校园服务指南（可选）",
-    "replace": true
-  }'
+  -d '{"filename":"校园服务指南.md","content":"# XX大学……\n\n## 第一章……\n\n第1条……","replace":true}'
+
+# 文字版 PDF（base64）
+curl -X POST http://127.0.0.1:8000/api/v1/documents/upload \
+  -H "Content-Type: application/json" \
+  -d '{"filename":"学生手册.pdf","content_base64":"JVBERi0xLjQK...","replace":true}'
 ```
 
 响应示例：`{"document_id":2,"chunk_count":16,"chapters":6,"status":"done","message":"入库成功"}`。
 配套接口：`GET /api/v1/documents`（列表）、`GET /api/v1/documents/{id}`（详情+分块）、
 `DELETE /api/v1/documents/{id}`（同时清理 Qdrant 向量与 Neo4j 图谱）。
-也可以在 Swagger <http://127.0.0.1:8000/docs> 里直接调（content 填文档全文）。
+Swagger <http://127.0.0.1:8000/docs> 里也能直接测。
+
+> 安装了 `python-multipart` 后，会**自动多出**标准文件上传接口
+> `POST /api/v1/documents/upload-file`（multipart：file / title / replace）。
+
+**PDF / OCR 依赖说明（也就是"为什么要不要装 python-multipart"）**
+
+| 需求 | 是否必须 | 说明 |
+| --- | --- | --- |
+| `python-multipart` | ❌ 不是必须 | **只和"怎么传文件"有关**，跟 PDF 解析、OCR、切块都无关；用 JSON/base64 上传就完全不需要 |
+| PyMuPDF | ✅ 本机已装（1.28.2） | PDF 文字层提取；扫描件时用它把页面渲染成图片交给 OCR |
+| `rapidocr_onnxruntime` + `pillow` | 仅扫描件需要 | 推荐 OCR 方案：中文友好、无需外部 exe |
+| `pytesseract` + Tesseract | 备选 OCR | 需另装 Tesseract 程序 + `chi_sim` 中文语言包 |
+| `pypdf` | 可选 | 本机已装，PyMuPDF 提取失败时可作为备用（当前未启用） |
+
+安装命令（要在**你自己的终端**执行；演示脚本用的是全局 Python）：
+
+```powershell
+# 可选：启用标准 multipart 文件上传接口
+& G:\DevEnv\Python\Python314\python.exe -m pip install python-multipart
+
+# 扫描件 PDF OCR（推荐方案）
+& G:\DevEnv\Python\Python314\python.exe -m pip install rapidocr_onnxruntime pillow
+```
+
+**切块逻辑**（PDF 文字层 / OCR 结果共用同一解析器）：
+
+1. 优先按「第X章 / 第N条」结构化切块；
+2. 没有条款结构时，按 600 字 + 80 字重叠兜底切块；
+3. 单块超过 1200 字自动再拆分，避免向量过长影响召回；
+4. OCR 文本建议入库前人工抽查（扫描件可能有错字、页眉页脚混入）。
 
 **方式二：命令行批量入库（后端停止时使用）**
 
@@ -414,8 +453,7 @@ python scripts/ingest_rules.py --dir ../rules --reset
 ```
 
 > ⚠️ Qdrant 本地嵌入式模式同一目录只能被一个进程打开：**跑命令行入库前先停掉后端**；
-> 后端运行时请用上传接口。首版上传只支持 `.md` / `.txt` 文本，PDF/DOCX 需要后续安装
-> `python-multipart` 并改为 multipart 上传。
+> 后端运行时请用上传接口。命令行目前只处理 `.md` / `.txt`，PDF 请走上上传接口。
 > 仓库内 `rules/学生手册节选.md`（26 条）和 `rules/校园服务指南节选.md`（16 条）都是虚构样例；
 > 当前库内为 2 份文档 / 42 个条款（Qdrant 42 个向量、Neo4j 42 个条款节点）。
 
@@ -444,7 +482,7 @@ school-rules-rag-platform/
 │   │   ├── services/        #   LLM / Qdrant+BGE / Neo4j / MySQL / 语义缓存适配器
 │   │   ├── db/              #   SQLAlchemy 模型与引擎
 │   │   └── schemas/         #   Pydantic 模型
-│   ├── tests/               # ✅ 20 项测试（图引擎 + SSE + MySQL + 解析器 + Neo4j）
+│   ├── tests/               # ✅ 28 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j）
 │   ├── scripts/
 │   │   └── ingest_rules.py  # ✅ 校规文档入库（MySQL + Qdrant + Neo4j）
 │   └── data/                #   本地 Qdrant 数据（已 gitignore）
@@ -480,6 +518,8 @@ school-rules-rag-platform/
   - 真实 MySQL 落库 + 会话历史 + 点赞点踩 API；
   - 真实 DeepSeek（deepseek-chat）端到端跑通；
   - 22 项自动化测试全过
+  - PDF 文字版上传（base64）+ 扫描件 OCR 自动回退（装 OCR 引擎后生效）
+  - 28 项自动化测试全过
 
 ### 🚧 进行中
 

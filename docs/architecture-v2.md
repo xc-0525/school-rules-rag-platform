@@ -98,7 +98,8 @@ flowchart TD
 | `GET /api/v1/conversations` | 会话列表（含消息数） |
 | `GET /api/v1/conversations/{id}` | 会话详情（完整消息 + 来源引用） |
 | `POST /api/v1/messages/{id}/feedback` | 点赞 / 点踩 |
-| `POST /api/v1/documents/upload` | 上传校规文档（JSON 文本，.md/.txt）并入库三库 |
+| `POST /api/v1/documents/upload` | 上传文档并入库（JSON：md/txt 文本 或 PDF 的 base64） |
+| `POST /api/v1/documents/upload-file` | multipart 文件上传（安装 python-multipart 后自动出现） |
 | `GET /api/v1/documents` | 文档列表（含分块数/状态） |
 | `GET /api/v1/documents/{id}` | 文档详情（分块预览 + qdrant_point_id） |
 | `DELETE /api/v1/documents/{id}` | 删除文档（MySQL + Qdrant + Neo4j 同步清理） |
@@ -118,8 +119,12 @@ rules/*.md|*.txt
 命令：`cd backend && python scripts/ingest_rules.py --dir ../rules --reset`
 （注意：Qdrant 本地模式同一目录只能被一个进程打开，跑命令行入库前请先停后端。）
 
-后端运行中上传：`POST /api/v1/documents/upload`（JSON：filename / content / title / replace），
+后端运行中上传：`POST /api/v1/documents/upload`（JSON：filename / content 或 content_base64 PDF / title / replace），
 复用已加载的 BGE 与 Qdrant 客户端；删除文档时同步清理 Qdrant 向量与 Neo4j 图谱节点。
+
+PDF 策略：文字版 PDF 用 PyMuPDF 直接提取（零额外依赖，已实测）；扫描件自动回退 OCR
+（`rapidocr_onnxruntime`，未安装时返回明确的安装提示）。切块优先按「第X章/第N条」，
+无结构时按 600 字+80 字重叠兜底，超长块再拆分。
 
 图谱检索方式：问题关键词在 `Rule.content/article/Chapter.title` 上做包含匹配，命中后沿"文档 → 章节 → 条款 → 主题"遍历，返回带路径信息的证据（中文小语料下比全文索引更稳）。
 

@@ -19,6 +19,11 @@ neo4j>=5.0.0
 # 如需在 venv 里完整跑 VECTOR_MODE=qdrant，再取消下面这行：
 # sentence-transformers>=3.0.0
 
-# ---- 文件上传（可选）----
-# 当前上传接口用 JSON 文本（无需依赖）；后续支持 PDF/DOCX 的 multipart 上传时再装：
+# ---- 文件上传 / PDF 解析 ----
+# 文字版 PDF 解析（当前上传接口已支持，PyMuPDF 也用于渲染页面做 OCR）
+pymupdf>=1.24.0
+# 标准 multipart 文件上传（可选；装了才会出现 /documents/upload-file 接口）
 # python-multipart>=0.0.9
+# 扫描件 OCR（可选，二选一）：
+# rapidocr_onnxruntime>=1.4  +  pillow     # 推荐：中文友好、无需外部 exe
+# pytesseract>=0.3 + Tesseract-OCR 中文包  # 需另外安装 Tesseract 引擎

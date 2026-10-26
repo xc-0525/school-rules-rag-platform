@@ -170,10 +170,18 @@ class ApiTests(unittest.TestCase):
     def test_document_upload_rejects_bad_suffix(self) -> None:
         response = self.client.post(
             "/api/v1/documents/upload",
-            json={"filename": "demo.pdf", "content": "%PDF"},
+            json={"filename": "demo.docx", "content": "fake"},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("暂只支持", response.json()["detail"])
+
+    def test_pdf_upload_requires_base64(self) -> None:
+        response = self.client.post(
+            "/api/v1/documents/upload",
+            json={"filename": "demo.pdf", "content": "not base64"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("content_base64", response.json()["detail"])
 
     def test_chat_non_stream(self) -> None:
         response = self.client.post(

@@ -2,21 +2,37 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class UploadTextRequest(BaseModel):
-    """文本上传请求（.md / .txt）。
+    """文档上传请求。
+
+    两种传法（二选一）：
+    - .md / .txt：用 content 传 UTF-8 文本；
+    - .pdf：用 content_base64 传文件内容的 base64（文字版 PDF）。
 
     之所以用 JSON 而不是 multipart：本机 Python 没有 python-multipart，
-    且当前沙箱内无法安装；对纯文本校规文件，前端读成文本后 POST JSON 即可。
-    后续接 PDF/DOCX 时再安装 python-multipart 换成 multipart 上传。
+    且当前沙箱内无法安装；如需标准文件上传，可另装 python-multipart
+    并使用 /api/v1/documents/upload-file（安装后自动出现）。
     """
 
-    filename: str = Field(..., description="文件名，后缀需为 .md 或 .txt", examples=["校园服务指南.md"])
-    content: str = Field(..., description="文件文本内容（UTF-8）")
-    title: str | None = Field(default=None, description="自定义标题，留空取文档一级标题")
+    filename: str = Field(..., description="文件名，后缀 .md / .txt / .pdf", examples=["校园服务指南.md"])
+    content: str | None = Field(default=None, description=".md/.txt 的 UTF-8 文本内容")
+    content_base64: str | None = Field(default=None, description=".pdf 的 base64 文件内容")
+    title: str | None = Field(default=None, description="自定义标题，留空取文档标题/文件名")
     replace: bool = Field(default=True, description="同名文件是否覆盖替换")
+
+    @model_validator(mode="after")
+    def _check_payload(self) -> "UploadTextRequest":
+        has_text = bool(self.content and self.content.strip())
+        has_base64 = bool(self.content_base64 and self.content_base64.strip())
+        if has_text and has_base64:
+            raise ValueError("content 与 content_base64 只能提供一个")
+        if not has_text and not has_base64:
+            raise ValueError("content 与 content_base64 必须提供一个")
+        return self
+
 
 
 class DocumentItem(BaseModel):
