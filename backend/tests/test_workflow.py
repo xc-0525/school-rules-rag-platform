@@ -158,6 +158,23 @@ class ApiTests(unittest.TestCase):
         self.assertIn("parallel", payload["control_structures"])
         self.assertTrue(any(node["kind"] == "parallel" for node in payload["nodes"]))
 
+    def test_document_upload_requires_real_mode(self) -> None:
+        """mock 向量模式下上传接口应明确拒绝（需要真实 Qdrant 才能入库）。"""
+        response = self.client.post(
+            "/api/v1/documents/upload",
+            json={"filename": "demo.md", "content": "# demo\n\n第1条 测试"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("mock", response.json()["detail"])
+
+    def test_document_upload_rejects_bad_suffix(self) -> None:
+        response = self.client.post(
+            "/api/v1/documents/upload",
+            json={"filename": "demo.pdf", "content": "%PDF"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("暂只支持", response.json()["detail"])
+
     def test_chat_non_stream(self) -> None:
         response = self.client.post(
             "/api/v1/chat", json={"query": "宿舍晚上几点熄灯？", "stream": False}

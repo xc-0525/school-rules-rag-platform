@@ -98,6 +98,10 @@ flowchart TD
 | `GET /api/v1/conversations` | 会话列表（含消息数） |
 | `GET /api/v1/conversations/{id}` | 会话详情（完整消息 + 来源引用） |
 | `POST /api/v1/messages/{id}/feedback` | 点赞 / 点踩 |
+| `POST /api/v1/documents/upload` | 上传校规文档（JSON 文本，.md/.txt）并入库三库 |
+| `GET /api/v1/documents` | 文档列表（含分块数/状态） |
+| `GET /api/v1/documents/{id}` | 文档详情（分块预览 + qdrant_point_id） |
+| `DELETE /api/v1/documents/{id}` | 删除文档（MySQL + Qdrant + Neo4j 同步清理） |
 | `GET /health` | 健康检查（模式 / 图节点数 / 向量预热状态） |
 
 ## 5.1 校规文档入库流水线（已完成）
@@ -112,6 +116,10 @@ rules/*.md|*.txt
 ```
 
 命令：`cd backend && python scripts/ingest_rules.py --dir ../rules --reset`
+（注意：Qdrant 本地模式同一目录只能被一个进程打开，跑命令行入库前请先停后端。）
+
+后端运行中上传：`POST /api/v1/documents/upload`（JSON：filename / content / title / replace），
+复用已加载的 BGE 与 Qdrant 客户端；删除文档时同步清理 Qdrant 向量与 Neo4j 图谱节点。
 
 图谱检索方式：问题关键词在 `Rule.content/article/Chapter.title` 上做包含匹配，命中后沿"文档 → 章节 → 条款 → 主题"遍历，返回带路径信息的证据（中文小语料下比全文索引更稳）。
 
@@ -146,7 +154,7 @@ backend/
 | D1 | 图引擎 + 10+ 节点 + SSE trace + Mock 适配器 + 测试 | ✅ 完成 |
 | D2 | Qdrant 本地模式 + 本地 BGE 小语料入库；MySQL 9 表 + 落库 + 会话历史 + 反馈 | ✅ 完成 |
 | D3 | Vue3：登录 + 问答（SSE/轨迹/来源/反馈） | ⏳ |
-| D4 | 会话历史前端 + 文档管理（上传/切分/入库）+ 联调 | ⏳ |
+| D4 | 文档上传/列表/详情/删除 API（✅ 已完成）；会话历史前端 + 文档管理前端 + 联调 | 🔄 |
 | D5 | Neo4j 校规图谱灌入 + `GRAPH_MODE=neo4j` 联调（服务已在运行） | ✅ 完成（含文档入库流水线，真实三库联调通过） |
 | D6 | 全链路彩排 + 种子数据 + 一键兜底 | ⏳ |
 | D7 | PPT + 实验报告 + 演示视频脚本 | ⏳ |

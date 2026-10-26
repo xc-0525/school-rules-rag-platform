@@ -18,3 +18,7 @@ neo4j>=5.0.0
 # 演示环境直接用全局 Python（已装好 sentence-transformers 6.x + torch CPU），
 # 如需在 venv 里完整跑 VECTOR_MODE=qdrant，再取消下面这行：
 # sentence-transformers>=3.0.0
+
+# ---- 文件上传（可选）----
+# 当前上传接口用 JSON 文本（无需依赖）；后续支持 PDF/DOCX 的 multipart 上传时再装：
+# python-multipart>=0.0.9

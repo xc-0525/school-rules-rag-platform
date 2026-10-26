@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.agents.graph import build_graph
 from app.api.v1.chat import build_router
 from app.api.v1.conversations import build_router as build_conversations_router
+from app.api.v1.documents import build_router as build_documents_router
 from app.core.config import Settings
 from app.services.container import Services, build_services
 
@@ -70,6 +71,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
     app.include_router(build_router(services, settings, nodes, entry))
     app.include_router(build_conversations_router(services))
+    app.include_router(build_documents_router(services, settings))
 
     @app.get("/health", tags=["运维"], summary="健康检查")
     async def health() -> dict[str, Any]:
