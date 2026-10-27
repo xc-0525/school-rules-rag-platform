@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agents.graph import build_graph
+from app.api.v1.auth import build_router as build_auth_router
 from app.api.v1.chat import build_router
 from app.api.v1.conversations import build_router as build_conversations_router
 from app.api.v1.documents import build_router as build_documents_router
@@ -79,8 +80,9 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         allow_headers=["*"],
     )
 
+    app.include_router(build_auth_router(settings))
     app.include_router(build_router(services, settings, nodes, entry))
-    app.include_router(build_conversations_router(services))
+    app.include_router(build_conversations_router(services, settings))
     app.include_router(build_documents_router(services, settings))
 
     @app.get("/health", tags=["运维"], summary="健康检查")
@@ -93,6 +95,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                 "graph": settings.graph_mode,
                 "llm": settings.llm_mode,
                 "persistence": "mysql" if settings.mysql_url else "mock",
+                "auth": "required" if settings.auth_required else "optional",
             },
             "llm_configured": settings.llm_configured,
             "vector_ready": getattr(app.state, "vector_ready", None),

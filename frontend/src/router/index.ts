@@ -1,9 +1,16 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getToken } from '../utils/session'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/chat' },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/LoginView.vue'),
+      meta: { title: '登录', public: true },
+    },
     {
       path: '/chat',
       name: 'chat',
@@ -29,6 +36,18 @@ const router = createRouter({
       meta: { title: '关于与状态' },
     },
   ],
+})
+
+router.beforeEach((to) => {
+  const loggedIn = !!getToken()
+  if (to.meta.public) {
+    if (loggedIn && to.path === '/login') return { path: '/chat' }
+    return true
+  }
+  if (!loggedIn) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  return true
 })
 
 router.afterEach((to) => {

@@ -1,4 +1,5 @@
 import type { ChatDonePayload, SourceItem, TraceEvent } from '../types'
+import { clearSession, getToken } from '../utils/session'
 
 export interface StreamHandlers {
   onTrace?: (event: TraceEvent) => void
@@ -29,11 +30,22 @@ export async function streamChat(
   conversationId: number | null,
   handlers: StreamHandlers,
 ): Promise<void> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = getToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+
   const response = await fetch('/api/v1/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ query, stream: true, conversation_id: conversationId }),
   })
+
+  if (response.status === 401) {
+    clearSession()
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
+  }
 
   if (!response.ok) {
     let message = `HTTP ${response.status}`

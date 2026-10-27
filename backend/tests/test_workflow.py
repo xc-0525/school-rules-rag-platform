@@ -273,5 +273,99 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(done["refused"], False)
 
 
+class AuthTests(unittest.TestCase):
+    """登录 / 鉴权 / 按用户隔离会话。"""
+
+    def _build_client(self, auth_required: bool = True) -> TestClient:
+        settings = make_settings()
+        settings.auth_required = auth_required
+        services = build_services(settings)
+        services.llm = FakeLLM()
+        return TestClient(create_app(settings, services=services))
+
+    def _login(self, client: TestClient, username: str, password: str) -> str:
+        response = client.post(
+            "/api/v1/auth/login", json={"username": username, "password": password}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["token"]
+
+    @staticmethod
+    def _headers(token: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_login_me_logout(self) -> None:
+        client = self._build_client()
+        token = self._login(client, "admin", "admin123")
+
+        me = client.get("/api/v1/auth/me", headers=self._headers(token))
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(me.json()["username"], "admin")
+        self.assertEqual(me.json()["role"], "admin")
+
+        wrong = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "bad-password"}
+        )
+        self.assertEqual(wrong.status_code, 401)
+
+        self.assertEqual(client.post("/api/v1/auth/logout", headers=self._headers(token)).status_code, 200)
+        expired = client.get("/api/v1/auth/me", headers=self._headers(token))
+        self.assertEqual(expired.status_code, 401)
+
+    def test_auth_required_blocks_business_apis(self) -> None:
+        client = self._build_client()
+        # 未登录：业务接口 401，健康检查保持公开
+        self.assertEqual(
+            client.post("/api/v1/chat", json={"query": "宿舍晚上几点熄灯？", "stream": False}).status_code,
+            401,
+        )
+        self.assertEqual(client.get("/api/v1/conversations").status_code, 401)
+        self.assertEqual(client.get("/health").status_code, 200)
+
+        admin = self._login(client, "admin", "admin123")
+        chat = client.post(
+            "/api/v1/chat",
+            json={"query": "宿舍晚上几点熄灯？", "stream": False},
+            headers=self._headers(admin),
+        )
+        self.assertEqual(chat.status_code, 200, chat.text)
+
+        # 学生不能上传文档（管理员可以，mock 模式下再被 400 拒绝）
+        student = self._login(client, "student", "student123")
+        payload = {"filename": "demo.md", "content": "# demo\n\n第1条 测试"}
+        self.assertEqual(
+            client.post("/api/v1/documents/upload", json=payload, headers=self._headers(student)).status_code,
+            403,
+        )
+        admin_upload = client.post(
+            "/api/v1/documents/upload", json=payload, headers=self._headers(admin)
+        )
+        self.assertEqual(admin_upload.status_code, 400)
+        self.assertIn("mock", admin_upload.json()["detail"])
+
+    def test_conversation_isolation_between_users(self) -> None:
+        client = self._build_client()
+        admin = self._login(client, "admin", "admin123")
+        student = self._login(client, "student", "student123")
+
+        chat = client.post(
+            "/api/v1/chat",
+            json={"query": "宿舍晚上几点熄灯？", "stream": False},
+            headers=self._headers(admin),
+        )
+        self.assertEqual(chat.status_code, 200, chat.text)
+
+        admin_list = client.get("/api/v1/conversations", headers=self._headers(admin)).json()
+        student_list = client.get("/api/v1/conversations", headers=self._headers(student)).json()
+        self.assertTrue(admin_list)
+        self.assertEqual(student_list, [])
+
+        conversation_id = admin_list[0]["id"]
+        denied = client.get(
+            f"/api/v1/conversations/{conversation_id}", headers=self._headers(student)
+        )
+        self.assertEqual(denied.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -19,12 +19,23 @@
 
 | 路由 | 页面 | 能力 |
 | --- | --- | --- |
+| `/login` | 登录 | admin / student 演示账号登录，后端 `/api/v1/auth/login` 校验，token 存 localStorage |
 | `/chat` | 智能问答 | SSE 流式回答；Agent 轨迹时间线；来源引用卡片；点赞/点踩；新对话；缓存/拒答/降级标签 |
-| `/history` | 会话历史 | 会话列表、消息详情、继续对话 |
-| `/documents` | 文档管理 | 上传 `.md/.txt/.pdf`（文本或 base64 JSON）、列表、删除、入库结果提示 |
+| `/history` | 会话历史 | 会话列表、消息详情、继续对话（后端按登录用户隔离） |
+| `/documents` | 文档管理 | 上传 `.md/.txt/.pdf`（文本或 base64 JSON）、列表、删除（仅管理员可写） |
 | `/about` | 关于与状态 | `/health` 运行模式、Agent 图节点/控制结构、接口一览、演示要点 |
 
-## 3. SSE 事件映射
+## 3. 登录鉴权
+
+- 登录：`POST /api/v1/auth/login` → 返回 token + 用户信息；`admin/admin123`（管理员）、`student/student123`（学生）。
+- 前端：token 存 localStorage，`api/client.ts` 的所有 REST 请求和 `api/sse.ts` 的 SSE 请求都会自动带
+  `Authorization: Bearer <token>`；收到 401 时清除本地会话并跳转 `/login`。
+- 路由守卫：未登录访问业务页会重定向登录；已登录访问 `/login` 会回到 `/chat`。
+- 后端：`AUTH_REQUIRED=1`（`start_backend.ps1` 默认开启）时所有业务接口需登录；
+  文档上传/删除要求管理员；会话列表/详情按 token 用户隔离。
+- 退出：`POST /api/v1/auth/logout` 使当前 token 失效。
+
+## 4. SSE 事件映射
 
 后端 `POST /api/v1/chat`（`stream=true`）返回：
 
@@ -38,7 +49,7 @@
 
 `frontend/src/api/sse.ts` 负责按 `\n\n` 切分事件帧、`event:`/`data:` 解析，不依赖第三方库。
 
-## 4. Agent 轨迹面板
+## 5. Agent 轨迹面板
 
 `AgentTrace.vue` 把 `trace` 事件还原成可读时间线：
 
@@ -47,7 +58,7 @@
 - 顶部汇总 `steps`、`retrieval_round`、`regen_count`；
 - 对 `parallel` / `selection` / `loop` 控制结构分别打标签，答辩时可直接对照图设计讲。
 
-## 5. 文档上传（不依赖 python-multipart）
+## 6. 文档上传（不依赖 python-multipart）
 
 - `.md/.txt`：前端 `File.text()` → `content` 字段；
 - `.pdf`：`File.arrayBuffer()` → base64 → `content_base64` 字段；
@@ -56,7 +67,7 @@
 - 上传需要后端真实模式（`VECTOR_MODE=qdrant` + Neo4j 已启动）；失败会显示后端返回的具体原因
   （如 Neo4j 不可用、扫描件需要 OCR）。
 
-## 6. 目录结构
+## 7. 目录结构
 
 ```text
 frontend/
@@ -66,23 +77,27 @@ frontend/
 │   ├── main.ts / App.vue
 │   ├── styles.css
 │   ├── types.ts
-│   ├── api/client.ts       # REST 客户端
-│   ├── api/sse.ts          # SSE 流解析
+│   ├── api/client.ts       # REST 客户端（自动带 Bearer token）
+│   ├── api/sse.ts          # SSE 流解析（自动带 Bearer token）
+│   ├── utils/session.ts    # token / 用户信息 localStorage 存取
+│   ├── stores/auth.ts      # Pinia：登录态
 │   ├── stores/chat.ts      # Pinia：会话与消息
 │   ├── components/
 │   │   ├── AgentTrace.vue
 │   │   ├── MessageBubble.vue
 │   │   └── SourceList.vue
 │   └── views/
+│       ├── LoginView.vue
 │       ├── ChatView.vue
 │       ├── HistoryView.vue
 │       ├── DocumentsView.vue
 │       └── AboutView.vue
 ```
 
-## 7. 已知限制
+## 8. 已知限制
 
-- 暂无登录页/鉴权：后端固定 `user_id=1`，前端直接进入问答（登录列在后续计划）；
+- token 是后端进程内存储（8 小时），重启后端需重新登录；尚未上 JWT / 刷新令牌；
+- 权限只区分管理员/学生（管理员可管理文档），没有更细的角色菜单权限；
 - 会话历史无删除入口（后端暂未提供删除会话接口）；
 - 生产构建包较大（Element Plus 全量引入），课程演示用 dev server 即可；
 - 演示前请确保后端 `/health` 的 `vector_ready=true`，否则首个问题会等待 BGE 预热。

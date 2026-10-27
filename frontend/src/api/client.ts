@@ -3,13 +3,33 @@ import type {
   ConversationItem,
   DocumentItem,
   HealthInfo,
+  LoginResponse,
   UploadResult,
+  UserInfo,
 } from '../types'
+import { clearSession, getToken } from '../utils/session'
 
 const BASE = (import.meta as any).env?.VITE_API_BASE ?? ''
 
+function withAuth(headersInit?: HeadersInit): Headers {
+  const headers = new Headers(headersInit)
+  const token = getToken()
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  return headers
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(BASE + path, init)
+  const response = await fetch(BASE + path, { ...init, headers: withAuth(init?.headers) })
+
+  if (response.status === 401 && !path.includes('/auth/login')) {
+    clearSession()
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
+  }
+
   if (!response.ok) {
     let message = `HTTP ${response.status}`
     try {
@@ -27,6 +47,24 @@ export function fetchHealth(): Promise<HealthInfo> {
   return request<HealthInfo>('/health')
 }
 
+// ---------------- 登录 / 鉴权 ----------------
+export function login(username: string, password: string): Promise<LoginResponse> {
+  return request<LoginResponse>('/api/v1/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+}
+
+export function fetchMe(): Promise<UserInfo> {
+  return request<UserInfo>('/api/v1/auth/me')
+}
+
+export function logout(): Promise<{ logged_out: boolean }> {
+  return request('/api/v1/auth/logout', { method: 'POST' })
+}
+
+// ---------------- 会话 ----------------
 export function fetchConversations(limit = 30): Promise<ConversationItem[]> {
   return request<ConversationItem[]>(`/api/v1/conversations?limit=${limit}`)
 }
@@ -43,6 +81,7 @@ export function sendFeedback(messageId: number, rating: number, comment?: string
   })
 }
 
+// ---------------- 文档 ----------------
 export function fetchDocuments(): Promise<DocumentItem[]> {
   return request<DocumentItem[]>('/api/v1/documents')
 }

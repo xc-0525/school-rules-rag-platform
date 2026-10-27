@@ -52,15 +52,21 @@ class MockPersistence:
         self._feedback: dict[tuple[int, int], dict[str, Any]] = {}
 
     async def save_qa(self, state: AgentState) -> int | None:
+        user_id = int(getattr(state, "user_id", DEMO_USER_ID) or DEMO_USER_ID)
         with self._lock:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             conversation_id = state.conversation_id
-            if not conversation_id or conversation_id not in self._conversations:
+            conversation = (
+                self._conversations.get(conversation_id)
+                if conversation_id
+                else None
+            )
+            if conversation is None or conversation["user_id"] != user_id:
                 self._conversation_seq += 1
                 conversation_id = self._conversation_seq
                 self._conversations[conversation_id] = {
                     "id": conversation_id,
-                    "user_id": DEMO_USER_ID,
+                    "user_id": user_id,
                     "title": (state.query or "新会话")[:30],
                     "created_at": now,
                     "updated_at": now,
@@ -161,13 +167,16 @@ class MySQLPersistence:
         from app.db.models import Conversation, Message
         from app.db.session import new_session
 
+        user_id = int(getattr(state, "user_id", DEMO_USER_ID) or DEMO_USER_ID)
         with new_session(self.url) as session:
             conversation = None
             if state.conversation_id:
                 conversation = session.get(Conversation, int(state.conversation_id))
+                if conversation is not None and conversation.user_id != user_id:
+                    conversation = None  # 不属于当前用户 → 新建会话
             if conversation is None:
                 conversation = Conversation(
-                    user_id=DEMO_USER_ID,
+                    user_id=user_id,
                     title=(state.query or "新会话")[:30],
                     updated_at=datetime.now(),
                 )

@@ -165,6 +165,56 @@ body {
   font-size: 13px;
 }
 
+/* ---------------- 登录页 ---------------- */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(79, 140, 255, 0.18), transparent 32%),
+    radial-gradient(circle at 85% 80%, rgba(124, 58, 237, 0.16), transparent 32%),
+    linear-gradient(160deg, #0f172a 0%, #1e293b 100%);
+}
+
+.login-card {
+  width: 420px;
+  max-width: 100%;
+  padding: 34px 34px 26px;
+  border-radius: 18px;
+  box-shadow: 0 24px 70px rgba(2, 6, 23, 0.45);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 26px;
+}
+
+.login-demo {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.login-tip {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.aside-logout {
+  margin-top: 10px;
+  color: #94a3b8 !important;
+  padding: 0;
+}
+
 /* ---------------- 聊天页 ---------------- */
 .chat-page {
   height: calc(100vh - 60px - 36px);

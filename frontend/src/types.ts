@@ -5,6 +5,19 @@ export interface SourceItem {
   snippet: string
 }
 
+export interface UserInfo {
+  id: number
+  username: string
+  nickname?: string | null
+  role: 'admin' | 'student' | string
+}
+
+export interface LoginResponse {
+  token: string
+  expires_in: number
+  user: UserInfo
+}
+
 export interface TraceEvent {
   ts_ms?: number
   node?: string

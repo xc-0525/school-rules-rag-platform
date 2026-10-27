@@ -16,6 +16,7 @@ class AgentState(BaseModel):
 
     query: str
     conversation_id: int | None = None
+    user_id: int = 1
 
     # ---- 查询理解 ----
     intent: str = ""

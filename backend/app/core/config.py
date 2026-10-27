@@ -50,6 +50,9 @@ class Settings:
     llm_temperature: float = 0.2
     llm_timeout: float = 60.0
 
+    # ---- 登录/鉴权（AUTH_REQUIRED=1 时所有业务接口必须带 Bearer token）----
+    auth_required: bool = False
+
     # ---- 编排参数（图引擎的循环/步数上限）----
     max_steps: int = 24
     max_retrieval_rounds: int = 2
@@ -78,6 +81,8 @@ class Settings:
             deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip(),
             llm_temperature=_env_float("LLM_TEMPERATURE", 0.2),
             llm_timeout=_env_float("LLM_TIMEOUT_SECONDS", 60.0),
+            auth_required=os.getenv("AUTH_REQUIRED", "0").strip().lower()
+            in {"1", "true", "yes", "on"},
             max_steps=_env_int("MAX_STEPS", 24),
             max_retrieval_rounds=_env_int("MAX_RETRIEVAL_ROUNDS", 2),
             max_regen=_env_int("MAX_REGEN", 1),

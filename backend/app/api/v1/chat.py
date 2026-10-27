@@ -15,7 +15,7 @@ import json
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.agents.events import EventBus
@@ -23,6 +23,7 @@ from app.agents.runtime import WorkflowEngine, WorkflowError
 from app.agents.state import AgentState
 from app.core.config import Settings
 from app.schemas.chat import ChatRequest, ChatResponse, SourceItem
+from app.services.auth import AuthUser, build_current_user_dependency
 from app.services.llm import LLMError
 
 
@@ -64,6 +65,7 @@ def build_router(
     entry: str,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["问答"])
+    current_user = build_current_user_dependency(settings)
 
     def make_engine(bus: Any = None) -> WorkflowEngine:
         return WorkflowEngine(nodes, entry, services, settings, bus)
@@ -88,8 +90,12 @@ def build_router(
         },
         summary="多智能体问答（真实 DeepSeek + SSE 流式 + Agent 轨迹）",
     )
-    async def chat(request: ChatRequest):
-        state = AgentState(query=request.query, conversation_id=request.conversation_id)
+    async def chat(request: ChatRequest, user: AuthUser | None = Depends(current_user)):
+        state = AgentState(
+            query=request.query,
+            conversation_id=request.conversation_id,
+            user_id=user.id if user else 1,
+        )
 
         # ---------------- 非流式：一次性 JSON（Swagger 调试方便） ----------------
         if not request.stream:

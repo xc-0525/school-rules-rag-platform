@@ -32,6 +32,7 @@
 | 文档上传 / 列表 / 详情 / 删除 API | ✅ `.md/.txt` + 文字版 PDF（base64）；扫描件自动 OCR（已实测，单页约 8s） | [`backend/app/api/v1/documents.py`](backend/app/api/v1/documents.py) |
 | 校规样例文档 | ✅ 已提供（虚构样例，替换真实文档后重跑入库即可） | [`rules/学生手册节选.md`](rules/学生手册节选.md) |
 | Vue3 前端（问答 / 轨迹 / 历史 / 文档） | ✅ 已完成：SSE 流式问答 + Agent 轨迹 + 来源引用 + 会话历史 + 文档管理 | [`frontend/`](frontend/) |
+| 登录鉴权（admin / student） | ✅ 登录页 + Bearer token + 按用户隔离会话；管理员才能上传/删除文档 | [`backend/app/services/auth.py`](backend/app/services/auth.py) |
 | 数据库建表脚本 | ✅ 已补齐，兼容 MySQL 5.5 / 8.0 | [`sql/init_mysql.sql`](sql/init_mysql.sql) |
 
 **答辩演示启动顺序**：
@@ -51,10 +52,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_backend.ps1
 # 4) 启动前端（另开窗口；Vite 代理到 8000）
 powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 # 浏览器：http://127.0.0.1:5173
+# 演示账号：admin / admin123（管理员）、student / student123（学生）
 ```
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
-> 当前测试：**33 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由）；
+> 实际演示用 `start_backend.ps1` 时会自动设置 `AUTH_REQUIRED=1`（所有业务接口需带 Bearer token）。
+> 当前测试：**36 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录鉴权/会话隔离）；
 > 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
 > 本轮已修复：降级答案不再进缓存、文档上传/删除后清空缓存、上传前预检 Neo4j 并在失败时回滚半成品、
 > 图谱标题引用校验误判、启动脚本固定全局 Python。
@@ -64,7 +67,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 1. **校规内容为虚构样例**：`rules/学生手册节选.md` 只用于跑通链路，拿到学校真实文件后替换并重新入库即可；
 2. **扫描件 OCR 已可用但建议人工抽查**：`rapidocr_onnxruntime` + Pillow 已安装，实测单页约 8 秒；
    OCR 可能把「第1条」识别成「第1 条」（已做文本归一化修正），但真实扫描件的错字/页眉页脚仍需入库前抽查；
-3. **尚无登录鉴权**：演示固定使用 `user_id=1`，文档删除/会话接口未做身份校验，答辩若被追问需说明是下一阶段；
+3. **登录是演示级 token**：token 存在后端进程内存里（8 小时），重启后端需重新登录；未做 JWT/刷新令牌，
+   学生/管理员权限只区分"文档管理"，更细的角色权限是后续计划；
 4. **Swagger UI 中的流式响应是“一次性显示”的**：想看打字机效果请用前端 <http://127.0.0.1:5173> 或 `curl -N`；
 5. **“语义缓存”实际是问题归一化 + 精确匹配**：答辩时建议称“问题归一化缓存”，真正的向量语义缓存是后续计划；
 6. 本地 MySQL 是 **5.5.11**（较老），脚本已做兼容；答辩后再评估升级 8.0。
@@ -384,6 +388,9 @@ NEO4J_PASSWORD=
 DEEPSEEK_API_KEY=sk-xxxx
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
+
+# 登录鉴权：1=业务接口必须带 Bearer token（start_backend.ps1 默认开启），0=允许匿名
+AUTH_REQUIRED=1
 ```
 
 ```bash
@@ -476,8 +483,8 @@ npm run dev
 ```
 
 - 开发地址：<http://127.0.0.1:5173>，Vite 已把 `/api`、`/health` 代理到 `127.0.0.1:8000`；
-- 页面：**智能问答**（SSE 流式回答 + Agent 轨迹 + 来源引用 + 点赞点踩）、**会话历史**、
-  **文档管理**（上传 `.md/.txt/.pdf`、列表、删除）、**关于与状态**（运行模式 / 图节点 / 演示要点）；
+- 页面：**登录**（admin/admin123、student/student123）、**智能问答**（SSE 流式回答 + Agent 轨迹 + 来源引用 + 点赞点踩）、**会话历史**、
+  **文档管理**（上传 `.md/.txt/.pdf`、列表、删除；仅管理员可写）、**关于与状态**（运行模式 / 图节点 / 演示要点）；
 - 生产构建：`npm run build`，产物在 `frontend/dist/`；
 - 前端设计说明见 [`docs/frontend-design.md`](docs/frontend-design.md)。
 
@@ -498,7 +505,7 @@ school-rules-rag-platform/
 │   │   ├── services/        #   LLM / Qdrant+BGE / Neo4j / MySQL / 语义缓存适配器
 │   │   ├── db/              #   SQLAlchemy 模型与引擎
 │   │   └── schemas/         #   Pydantic 模型
-│   ├── tests/               # ✅ 33 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 缓存/引用/OCR 回归）
+│   ├── tests/               # ✅ 36 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 鉴权 + 缓存/引用/OCR 回归）
 │   ├── scripts/
 │   │   └── ingest_rules.py  # ✅ 校规文档入库（MySQL + Qdrant + Neo4j）
 │   └── data/                #   本地 Qdrant 数据（已 gitignore）
@@ -542,10 +549,11 @@ school-rules-rag-platform/
   - 真实 MySQL 落库 + 会话历史 + 点赞点踩 API；
   - 真实 DeepSeek（deepseek-chat）端到端跑通；
   - PDF 文字版上传（base64）+ 扫描件 OCR 自动识别（已实测：单页约 8 秒，含「第N条」归一化）；
-  - **Vue3 + Vite 前端**：SSE 流式问答、Agent 轨迹面板、来源引用、点赞点踩、会话历史、文档管理；
+  - **Vue3 + Vite 前端**：登录页、SSE 流式问答、Agent 轨迹面板、来源引用、点赞点踩、会话历史、文档管理；
+  - **登录鉴权**：admin/student 演示账号、Bearer token、按用户隔离会话、管理员才能上传/删除文档；
   - **本轮回归修复**：降级答案不进缓存、上传/删除后清空缓存、上传前 Neo4j 预检 + 失败回滚、
     图谱证据标题引用校验、启动脚本固定全局 Python、Neo4j driver 复用、multipart 路由 OpenAPI 修复；
-  - 33 项自动化测试全过
+  - 36 项自动化测试全过
 
 ### 🚧 进行中
 
@@ -554,7 +562,7 @@ school-rules-rag-platform/
 
 ### 📋 后续计划
 
-- 登录鉴权与角色权限（学生 / 管理员）——前端登录页 + 后端 token 校验
+- JWT / 刷新令牌与更细的角色权限（当前为进程内 token + 管理员/学生两级）
 - 证据约束生成评测（命中率、拒答准确率、响应延迟）
 - 真正的问题语义缓存（embedding 相似度，当前是归一化精确匹配）
 - 文档管理后台、标签、公告模块

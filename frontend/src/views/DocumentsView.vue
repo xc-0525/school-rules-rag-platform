@@ -6,9 +6,12 @@
         <div class="muted">上传后自动解析「第X章 / 第N条」，写入 MySQL 元数据、Qdrant 向量和 Neo4j 图谱</div>
       </div>
       <div class="document-actions">
-        <el-input v-model="title" placeholder="自定义标题（可选）" clearable style="width: 200px" />
-        <el-checkbox v-model="replace">同名覆盖</el-checkbox>
-        <el-button type="primary" :loading="uploading" @click="pickFile">上传文档</el-button>
+        <template v-if="auth.isAdmin">
+          <el-input v-model="title" placeholder="自定义标题（可选）" clearable style="width: 200px" />
+          <el-checkbox v-model="replace">同名覆盖</el-checkbox>
+          <el-button type="primary" :loading="uploading" @click="pickFile">上传文档</el-button>
+        </template>
+        <el-tag v-else type="info" effect="plain">学生账号只读</el-tag>
         <el-button :loading="loading" @click="load">刷新</el-button>
         <input
           ref="fileInput"
@@ -47,7 +50,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="上传时间" width="180" />
-      <el-table-column label="操作" width="100" fixed="right">
+      <el-table-column v-if="auth.isAdmin" label="操作" width="100" fixed="right">
         <template #default="{ row }">
           <el-button link type="danger" :disabled="deletingId === row.id" @click="remove(row)">
             删除
@@ -65,8 +68,10 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { deleteDocument, fetchDocuments, uploadDocument } from '../api/client'
+import { useAuthStore } from '../stores/auth'
 import type { DocumentItem } from '../types'
 
+const auth = useAuthStore()
 const documents = ref<DocumentItem[]>([])
 const loading = ref(false)
 const uploading = ref(false)
@@ -76,6 +81,10 @@ const replace = ref(true)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 function pickFile() {
+  if (!auth.isAdmin) {
+    ElMessage.warning('仅管理员可上传文档')
+    return
+  }
   fileInput.value?.click()
 }
 
@@ -98,6 +107,10 @@ async function onFileChange(event: Event) {
 }
 
 async function upload(file: File) {
+  if (!auth.isAdmin) {
+    ElMessage.warning('仅管理员可上传文档')
+    return
+  }
   uploading.value = true
   const lower = file.name.toLowerCase()
   try {
@@ -142,6 +155,10 @@ async function load() {
 }
 
 async function remove(row: DocumentItem) {
+  if (!auth.isAdmin) {
+    ElMessage.warning('仅管理员可删除文档')
+    return
+  }
   try {
     await ElMessageBox.confirm(
       `确定删除「${row.title}」吗？会同时清理 Qdrant 向量和 Neo4j 图谱。`,

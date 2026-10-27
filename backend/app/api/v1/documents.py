@@ -18,7 +18,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 
 from app.core.config import BASE_DIR, Settings
@@ -31,6 +31,7 @@ from app.schemas.document import (
     DocumentUploadResponse,
     UploadTextRequest,
 )
+from app.services.auth import AuthUser, build_current_user_dependency
 from app.services.ingestion import GraphUnavailableError, RulesIngestor
 from app.services.ocr_parser import OCRUnavailableError, ocr_pdf_bytes
 from app.services.pdf_parser import PDFTextError, parse_pdf_bytes
@@ -128,6 +129,12 @@ def _unlink_upload(file_path: str) -> None:
 
 def build_router(services: Any, settings: Settings) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["文档"])
+    current_user = build_current_user_dependency(settings)
+
+    def ensure_admin(user: AuthUser | None) -> None:
+        """AUTH_REQUIRED=1 时，上传/删除文档仅管理员可操作。"""
+        if settings.auth_required and (user is None or not user.is_admin):
+            raise HTTPException(status_code=403, detail="仅管理员可管理校规文档")
 
     def require_mysql() -> None:
         if not settings.mysql_url:
@@ -243,7 +250,10 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         response_model=DocumentUploadResponse,
         summary="上传文档并入库（JSON：文本或 PDF base64）",
     )
-    async def upload_document(payload: UploadTextRequest):
+    async def upload_document(
+        payload: UploadTextRequest, user: AuthUser | None = Depends(current_user)
+    ):
+        ensure_admin(user)
         safe_name = Path(payload.filename or "").name
         suffix = Path(safe_name).suffix.lower()
 
@@ -276,7 +286,9 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
             file: UploadFile = File(..., description=".md / .txt / 文字版 .pdf"),
             title: str | None = Form(default=None),
             replace: bool = Form(default=True),
+            user: AuthUser | None = Depends(current_user),
         ):
+            ensure_admin(user)
             raw = await file.read()
             return await _ingest_upload(
                 raw, Path(file.filename or "upload").name, title, replace
@@ -284,7 +296,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
 
     # ---------------- 列表 / 详情 / 删除 ----------------
     @router.get("/documents", response_model=list[DocumentItem], summary="文档列表")
-    async def list_documents():
+    async def list_documents(user: AuthUser | None = Depends(current_user)):
         require_mysql()
         return await asyncio.to_thread(_list_documents_sync, settings.mysql_url)
 
@@ -293,7 +305,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         response_model=DocumentDetail,
         summary="文档详情（含分块预览）",
     )
-    async def get_document(document_id: int):
+    async def get_document(document_id: int, user: AuthUser | None = Depends(current_user)):
         require_mysql()
         data = await asyncio.to_thread(_get_document_sync, settings.mysql_url, document_id)
         if data is None:
@@ -305,7 +317,10 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         response_model=DeleteResponse,
         summary="删除文档（同时清理 Qdrant 向量与 Neo4j 图谱）",
     )
-    async def delete_document(document_id: int):
+    async def delete_document(
+        document_id: int, user: AuthUser | None = Depends(current_user)
+    ):
+        ensure_admin(user)
         require_real_ingestion()
         data = await asyncio.to_thread(_get_document_sync, settings.mysql_url, document_id)
         if data is None:
