@@ -54,6 +54,9 @@ class Settings:
     auth_required: bool = False
     allow_registration: bool = True
 
+    # ---- 单端口演示：后端直接托管 frontend/dist（需先 npm run build）----
+    serve_frontend: bool = False
+
     # ---- 编排参数（图引擎的循环/步数上限）----
     max_steps: int = 24
     max_retrieval_rounds: int = 2
@@ -85,6 +88,8 @@ class Settings:
             auth_required=os.getenv("AUTH_REQUIRED", "0").strip().lower()
             in {"1", "true", "yes", "on"},
             allow_registration=os.getenv("ALLOW_REGISTRATION", "1").strip().lower()
+            in {"1", "true", "yes", "on"},
+            serve_frontend=os.getenv("SERVE_FRONTEND", "0").strip().lower()
             in {"1", "true", "yes", "on"},
             max_steps=_env_int("MAX_STEPS", 24),
             max_retrieval_rounds=_env_int("MAX_RETRIEVAL_ROUNDS", 2),

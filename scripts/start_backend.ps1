@@ -50,6 +50,7 @@ $env:LLM_MODE = 'deepseek'
 $env:VECTOR_MODE = 'qdrant'
 $env:GRAPH_MODE = 'neo4j'
 $env:AUTH_REQUIRED = '1'
+$env:SERVE_FRONTEND = '1'
 $env:EMBEDDING_MODEL_PATH = $ModelPath
 $env:QDRANT_PATH = 'data/qdrant'
 $env:NEO4J_URI = 'bolt://127.0.0.1:7687'
@@ -61,7 +62,13 @@ Write-Host "LLM_MODE     = $env:LLM_MODE" -ForegroundColor DarkGray
 Write-Host "VECTOR_MODE  = $env:VECTOR_MODE" -ForegroundColor DarkGray
 Write-Host "GRAPH_MODE   = $env:GRAPH_MODE" -ForegroundColor DarkGray
 Write-Host "AUTH_REQUIRED= $env:AUTH_REQUIRED" -ForegroundColor DarkGray
+Write-Host "SERVE_FRONTEND=$env:SERVE_FRONTEND" -ForegroundColor DarkGray
 Write-Host "NEO4J_URI    = $env:NEO4J_URI" -ForegroundColor DarkGray
+
+if ($env:SERVE_FRONTEND -eq '1' -and -not (Test-Path (Join-Path $RepoRoot 'frontend\dist\index.html'))) {
+    Write-Host "WARNING: frontend/dist not found. Run: cd frontend; npm run build" -ForegroundColor Yellow
+    Write-Host "         (or use the Vite dev server on 5173 instead)" -ForegroundColor Yellow
+}
 
 Set-Location $BackendDir
 Write-Host "Starting v2 backend: http://127.0.0.1:$Port" -ForegroundColor Cyan

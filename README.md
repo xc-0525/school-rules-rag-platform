@@ -45,16 +45,20 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_neo4j.ps1
 cd backend
 python scripts/ingest_rules.py --dir ../rules --reset
 
-# 3) 启动后端（使用全局 Python；同样需要等 BGE 预热）
+# 3) 启动后端（start_backend.ps1 默认 SERVE_FRONTEND=1，直接访问 http://127.0.0.1:8000 即可）
 cd ..
 powershell -ExecutionPolicy Bypass -File .\scripts\start_backend.ps1
 
-# 4) 启动前端（另开窗口；Vite 代理到 8000）
+# 4) 可选：前端开发模式（改前端代码/热更新时用；日常演示直接用 8000 即可）
 powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 # 浏览器：http://127.0.0.1:5173
 # 演示账号：admin / admin123（管理员）、student / student123（学生）
 # 登录页也支持自助注册（默认学生角色），可用新账号演示"自己的历史会话"
 ```
+
+> 单端口模式需要先构建一次前端：`cd frontend; npm run build`（已构建过可跳过）；
+> 后端会把 `frontend/dist` 挂到 `8000`，`/api`、`/docs`、`/health` 仍然照常可用。
+> 不设置 `SERVE_FRONTEND=1` 时，`http://127.0.0.1:8000/` 仍返回后端信息 JSON。
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
 > 实际演示用 `start_backend.ps1` 时会自动设置 `AUTH_REQUIRED=1`（所有业务接口需带 Bearer token）。
@@ -392,6 +396,9 @@ DEEPSEEK_MODEL=deepseek-chat
 
 # 登录鉴权：1=业务接口必须带 Bearer token（start_backend.ps1 默认开启），0=允许匿名
 AUTH_REQUIRED=1
+
+# 单端口演示：1=后端托管 frontend/dist（先 npm run build），访问 8000 即可看到前端
+SERVE_FRONTEND=1
 
 # 是否开放学生自助注册：1=开放（默认），0=关闭
 ALLOW_REGISTRATION=1

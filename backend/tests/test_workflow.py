@@ -203,6 +203,30 @@ class ApiTests(unittest.TestCase):
         self.assertIn("parallel", payload["control_structures"])
         self.assertTrue(any(node["kind"] == "parallel" for node in payload["nodes"]))
 
+    def test_serve_frontend_single_port_mode(self) -> None:
+        """SERVE_FRONTEND=1 时，/ 和 SPA 路由返回前端 index.html，API 不受影响。"""
+        dist_index = Path(__file__).resolve().parents[2] / "frontend" / "dist" / "index.html"
+        if not dist_index.exists():
+            self.skipTest("frontend/dist 未构建，跳过单端口模式测试")
+
+        settings = make_settings()
+        settings.serve_frontend = True
+        services = build_services(settings)
+        services.llm = FakeLLM()
+        client = TestClient(create_app(settings, services=services))
+
+        root = client.get("/")
+        self.assertEqual(root.status_code, 200)
+        self.assertIn("text/html", root.headers["content-type"])
+
+        spa = client.get("/chat")
+        self.assertEqual(spa.status_code, 200)
+        self.assertIn("text/html", spa.headers["content-type"])
+
+        self.assertEqual(client.get("/api/v1/graph").status_code, 200)
+        self.assertEqual(client.get("/health").status_code, 200)
+        self.assertEqual(client.get("/docs").status_code, 200)
+
     def test_document_upload_requires_real_mode(self) -> None:
         """mock 向量模式下上传接口应明确拒绝（需要真实 Qdrant 才能入库）。"""
         response = self.client.post(

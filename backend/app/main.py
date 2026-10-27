@@ -10,15 +10,17 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.agents.graph import build_graph
 from app.api.v1.auth import build_router as build_auth_router
 from app.api.v1.chat import build_router
 from app.api.v1.conversations import build_router as build_conversations_router
 from app.api.v1.documents import build_router as build_documents_router
-from app.core.config import Settings
+from app.core.config import BASE_DIR, Settings
 from app.services.container import Services, build_services
 
 
@@ -85,6 +87,15 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(build_conversations_router(services, settings))
     app.include_router(build_documents_router(services, settings))
 
+    # 单端口演示：SERVE_FRONTEND=1 且 frontend/dist 存在时，后端直接托管前端
+    frontend_dist = BASE_DIR.parent / "frontend" / "dist"
+    frontend_index = frontend_dist / "index.html"
+    serve_frontend = settings.serve_frontend and frontend_index.is_file()
+    if serve_frontend:
+        assets_dir = frontend_dist / "assets"
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
     @app.get("/health", tags=["运维"], summary="健康检查")
     async def health() -> dict[str, Any]:
         return {
@@ -110,14 +121,31 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         }
 
     @app.get("/", include_in_schema=False)
-    async def root() -> dict[str, str]:
+    async def root():
+        if serve_frontend:
+            return FileResponse(frontend_index)
         return {
             "name": f"{settings.app_name} · v2",
             "docs": "/docs",
             "chat": "POST /api/v1/chat",
             "graph": "GET /api/v1/graph",
             "legacy_demo": "极简版入口：uvicorn main:app --port 8001",
+            "hint": "设置 SERVE_FRONTEND=1 可直接在 8000 端口打开前端",
         }
+
+    if serve_frontend:
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_spa(full_path: str):
+            """SPA 路由回退：/chat、/history 等交给前端 index.html。"""
+            if full_path.startswith(
+                ("api/", "docs", "openapi.json", "redoc", "health", "assets")
+            ):
+                raise HTTPException(status_code=404, detail="Not Found")
+            candidate = (frontend_dist / full_path).resolve()
+            if full_path and frontend_dist.resolve() in candidate.parents and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(frontend_index)
 
     return app
 
