@@ -9,17 +9,20 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 
 from fastapi import Header, HTTPException
 
 from app.core.config import Settings
-from app.core.security import verify_password
+from app.core.security import hash_password, verify_password
 
 TOKEN_TTL_SECONDS = 8 * 60 * 60
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 
 # Mock 模式兜底账号（与 sql/init_mysql.sql 的种子账号一致）
 _DEMO_USERS: dict[str, tuple[str, str, int, str]] = {
@@ -27,6 +30,20 @@ _DEMO_USERS: dict[str, tuple[str, str, int, str]] = {
     "admin": ("admin123", "管理员", 1, "admin"),
     "student": ("student123", "演示学生", 2, "student"),
 }
+
+# Mock 模式下注册的用户（仅进程内有效；真实 MySQL 模式会写 users 表）
+_registered_users: dict[str, dict[str, object]] = {}
+_registered_lock = threading.Lock()
+_registered_seq = 1000
+
+
+class RegistrationError(ValueError):
+    """注册失败（用户名重复 / 格式不合法 / 未开放注册）。"""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
 
 
 @dataclass
@@ -115,12 +132,95 @@ def authenticate(settings: Settings, username: str, password: str) -> AuthUser |
         )
 
     demo = _DEMO_USERS.get(username)
-    if demo is None:
-        return None
-    demo_password, nickname, user_id, role = demo
-    if not secrets.compare_digest(demo_password, password):
-        return None
-    return AuthUser(id=user_id, username=username, nickname=nickname, role=role)
+    if demo is not None:
+        demo_password, nickname, user_id, role = demo
+        if not secrets.compare_digest(demo_password, password):
+            return None
+        return AuthUser(id=user_id, username=username, nickname=nickname, role=role)
+
+    with _registered_lock:
+        registered = dict(_registered_users.get(username) or {})
+    if registered and verify_password(password, str(registered["password_hash"])):
+        return AuthUser(
+            id=int(registered["id"]),
+            username=username,
+            nickname=str(registered.get("nickname") or "") or None,
+            role=str(registered.get("role") or "student"),
+        )
+    return None
+
+
+def register_user(
+    settings: Settings,
+    username: str,
+    password: str,
+    nickname: str | None = None,
+) -> AuthUser:
+    """学生自助注册（默认 student 角色；管理员只预置，不开放注册）。"""
+    username = (username or "").strip()
+    password = password or ""
+    nickname = (nickname or "").strip() or username
+
+    if not settings.allow_registration:
+        raise RegistrationError(403, "当前未开放注册")
+    if not USERNAME_PATTERN.match(username):
+        raise RegistrationError(400, "用户名需为 3-20 位字母、数字或下划线")
+    if len(password) < 6:
+        raise RegistrationError(400, "密码至少 6 位")
+    if len(password) > 128:
+        raise RegistrationError(400, "密码不能超过 128 位")
+    if len(nickname) > 50:
+        raise RegistrationError(400, "昵称不能超过 50 个字符")
+
+    if settings.mysql_url:
+        from sqlalchemy import select
+        from sqlalchemy.exc import IntegrityError
+
+        from app.db.models import User
+        from app.db.session import new_session
+
+        try:
+            with new_session(settings.mysql_url) as session:
+                exists = session.execute(
+                    select(User.id).where(User.username == username)
+                ).scalar_one_or_none()
+                if exists is not None:
+                    raise RegistrationError(409, "用户名已被注册")
+                user = User(
+                    username=username,
+                    password=hash_password(password),
+                    nickname=nickname,
+                    role="student",
+                    status=1,
+                    updated_at=datetime.now(),
+                )
+                session.add(user)
+                session.commit()
+                session.refresh(user)
+                return AuthUser(
+                    id=user.id,
+                    username=user.username,
+                    nickname=user.nickname,
+                    role=str(user.role or "student"),
+                )
+        except RegistrationError:
+            raise
+        except IntegrityError as exc:  # 并发注册同名
+            raise RegistrationError(409, "用户名已被注册") from exc
+
+    global _registered_seq
+    with _registered_lock:
+        if username in _DEMO_USERS or username in _registered_users:
+            raise RegistrationError(409, "用户名已被注册")
+        _registered_seq += 1
+        user_id = _registered_seq
+        _registered_users[username] = {
+            "id": user_id,
+            "password_hash": hash_password(password),
+            "nickname": nickname,
+            "role": "student",
+        }
+    return AuthUser(id=user_id, username=username, nickname=nickname, role="student")
 
 
 def _extract_bearer(authorization: str | None) -> str | None:

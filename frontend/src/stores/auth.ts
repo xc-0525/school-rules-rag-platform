@@ -1,5 +1,10 @@
 import { defineStore } from 'pinia'
-import { fetchMe, login as apiLogin, logout as apiLogout } from '../api/client'
+import {
+  fetchMe,
+  login as apiLogin,
+  logout as apiLogout,
+  register as apiRegister,
+} from '../api/client'
 import { clearSession, getToken, getUser, setSession } from '../utils/session'
 import type { UserInfo } from '../types'
 
@@ -18,6 +23,14 @@ export const useAuthStore = defineStore('auth', {
   actions: {
     async login(username: string, password: string): Promise<UserInfo> {
       const response = await apiLogin(username, password)
+      this.token = response.token
+      this.user = response.user
+      setSession(response.token, response.user)
+      return response.user
+    },
+
+    async register(username: string, password: string, nickname?: string): Promise<UserInfo> {
+      const response = await apiRegister(username, password, nickname)
       this.token = response.token
       this.user = response.user
       setSession(response.token, response.user)

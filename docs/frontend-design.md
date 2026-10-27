@@ -19,7 +19,7 @@
 
 | 路由 | 页面 | 能力 |
 | --- | --- | --- |
-| `/login` | 登录 | admin / student 演示账号登录，后端 `/api/v1/auth/login` 校验，token 存 localStorage |
+| `/login` | 登录 / 注册 | admin / student 演示账号登录；注册 tab 自助创建学生账号，成功后自动登录；token 存 localStorage |
 | `/chat` | 智能问答 | SSE 流式回答；Agent 轨迹时间线；来源引用卡片；点赞/点踩；新对话；缓存/拒答/降级标签 |
 | `/history` | 会话历史 | 会话列表、消息详情、继续对话（后端按登录用户隔离） |
 | `/documents` | 文档管理 | 上传 `.md/.txt/.pdf`（文本或 base64 JSON）、列表、删除（仅管理员可写） |
@@ -28,6 +28,8 @@
 ## 3. 登录鉴权
 
 - 登录：`POST /api/v1/auth/login` → 返回 token + 用户信息；`admin/admin123`（管理员）、`student/student123`（学生）。
+- 注册：`POST /api/v1/auth/register`（用户名 3-20 位字母/数字/下划线，密码 ≥6 位），默认 student 角色，
+  注册成功直接返回 token 自动登录；`ALLOW_REGISTRATION=0` 可关闭注册（前端仍显示 tab，后端返回 403）。
 - 前端：token 存 localStorage，`api/client.ts` 的所有 REST 请求和 `api/sse.ts` 的 SSE 请求都会自动带
   `Authorization: Bearer <token>`；收到 401 时清除本地会话并跳转 `/login`。
 - 路由守卫：未登录访问业务页会重定向登录；已登录访问 `/login` 会回到 `/chat`。
@@ -97,6 +99,7 @@ frontend/
 ## 8. 已知限制
 
 - token 是后端进程内存储（8 小时），重启后端需重新登录；尚未上 JWT / 刷新令牌；
+- 注册未做邮箱验证/验证码/审核，仅适合课程演示；管理员账号只能预置、不能自助注册；
 - 权限只区分管理员/学生（管理员可管理文档），没有更细的角色菜单权限；
 - 会话历史无删除入口（后端暂未提供删除会话接口）；
 - 生产构建包较大（Element Plus 全量引入），课程演示用 dev server 即可；

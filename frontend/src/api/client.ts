@@ -60,6 +60,18 @@ export function fetchMe(): Promise<UserInfo> {
   return request<UserInfo>('/api/v1/auth/me')
 }
 
+export function register(
+  username: string,
+  password: string,
+  nickname?: string,
+): Promise<LoginResponse> {
+  return request<LoginResponse>('/api/v1/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password, nickname: nickname || undefined }),
+  })
+}
+
 export function logout(): Promise<{ logged_out: boolean }> {
   return request('/api/v1/auth/logout', { method: 'POST' })
 }

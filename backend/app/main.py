@@ -96,6 +96,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                 "llm": settings.llm_mode,
                 "persistence": "mysql" if settings.mysql_url else "mock",
                 "auth": "required" if settings.auth_required else "optional",
+                "registration": "open" if settings.allow_registration else "closed",
             },
             "llm_configured": settings.llm_configured,
             "vector_ready": getattr(app.state, "vector_ready", None),

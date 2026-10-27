@@ -9,35 +9,96 @@
         </div>
       </div>
 
-      <el-form :model="form" label-position="top" @submit.prevent="submit">
-        <el-form-item label="用户名">
-          <el-input v-model="form.username" placeholder="admin" size="large" clearable />
-        </el-form-item>
-        <el-form-item label="密码">
-          <el-input
-            v-model="form.password"
-            type="password"
-            placeholder="admin123"
-            size="large"
-            show-password
-            @keyup.enter="submit"
-          />
-        </el-form-item>
-        <el-button type="primary" size="large" style="width: 100%" :loading="loading" @click="submit">
-          登 录
-        </el-button>
-      </el-form>
+      <el-tabs v-model="mode" stretch class="login-tabs">
+        <el-tab-pane label="登 录" name="login">
+          <el-form :model="loginForm" label-position="top" @submit.prevent="submitLogin">
+            <el-form-item label="用户名">
+              <el-input v-model="loginForm.username" placeholder="admin" size="large" clearable />
+            </el-form-item>
+            <el-form-item label="密码">
+              <el-input
+                v-model="loginForm.password"
+                type="password"
+                placeholder="admin123"
+                size="large"
+                show-password
+                @keyup.enter="submitLogin"
+              />
+            </el-form-item>
+            <el-button
+              type="primary"
+              size="large"
+              style="width: 100%"
+              :loading="loading"
+              @click="submitLogin"
+            >
+              登 录
+            </el-button>
+          </el-form>
+
+          <div class="login-demo">
+            <span class="muted">演示账号：</span>
+            <el-button link type="primary" @click="fill('admin')">
+              admin / admin123（管理员）
+            </el-button>
+            <el-button link type="primary" @click="fill('student')">
+              student / student123（学生）
+            </el-button>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="注 册" name="register">
+          <el-form :model="registerForm" label-position="top" @submit.prevent="submitRegister">
+            <el-form-item label="用户名">
+              <el-input
+                v-model="registerForm.username"
+                placeholder="3-20 位字母 / 数字 / 下划线"
+                size="large"
+                clearable
+              />
+            </el-form-item>
+            <el-form-item label="昵称（可选）">
+              <el-input v-model="registerForm.nickname" placeholder="例如：张三" size="large" />
+            </el-form-item>
+            <el-form-item label="密码">
+              <el-input
+                v-model="registerForm.password"
+                type="password"
+                placeholder="至少 6 位"
+                size="large"
+                show-password
+              />
+            </el-form-item>
+            <el-form-item label="确认密码">
+              <el-input
+                v-model="registerForm.confirm"
+                type="password"
+                placeholder="再输入一次密码"
+                size="large"
+                show-password
+                @keyup.enter="submitRegister"
+              />
+            </el-form-item>
+            <el-button
+              type="primary"
+              size="large"
+              style="width: 100%"
+              :loading="loading"
+              @click="submitRegister"
+            >
+              注册并登录
+            </el-button>
+          </el-form>
+          <div class="login-tip muted">
+            注册账号默认为学生角色：可问答、查看自己的历史会话；文档管理仅管理员可操作。
+          </div>
+        </el-tab-pane>
+      </el-tabs>
 
       <div v-if="error" class="error-text" style="margin-top: 12px">{{ error }}</div>
 
-      <div class="login-demo">
-        <span class="muted">演示账号：</span>
-        <el-button link type="primary" @click="fill('admin')">admin / admin123（管理员）</el-button>
-        <el-button link type="primary" @click="fill('student')">student / student123（学生）</el-button>
-      </div>
-
-      <div class="login-tip muted">
-        管理员可上传/删除文档；学生可问答、查看自己的历史会话。登录态 8 小时有效。
+      <div class="login-tip muted" v-if="mode === 'login'">
+        登录态 8 小时有效；管理员账号为预置账号，不开放注册。
       </div>
     </div>
   </div>
@@ -53,23 +114,30 @@ const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 
-const form = reactive({ username: 'admin', password: 'admin123' })
+const mode = ref<'login' | 'register'>('login')
 const loading = ref(false)
 const error = ref('')
 
-async function submit() {
+const loginForm = reactive({ username: 'admin', password: 'admin123' })
+const registerForm = reactive({ username: '', nickname: '', password: '', confirm: '' })
+
+function redirectAfterLogin() {
+  const redirect = (route.query.redirect as string) || '/chat'
+  router.push(redirect)
+}
+
+async function submitLogin() {
   if (loading.value) return
   error.value = ''
-  if (!form.username.trim() || !form.password) {
+  if (!loginForm.username.trim() || !loginForm.password) {
     error.value = '请输入用户名和密码'
     return
   }
   loading.value = true
   try {
-    await auth.login(form.username.trim(), form.password)
+    await auth.login(loginForm.username.trim(), loginForm.password)
     ElMessage.success(`欢迎，${auth.displayName}`)
-    const redirect = (route.query.redirect as string) || '/chat'
-    router.push(redirect)
+    redirectAfterLogin()
   } catch (err: any) {
     error.value = err?.message || '登录失败'
   } finally {
@@ -77,8 +145,36 @@ async function submit() {
   }
 }
 
+async function submitRegister() {
+  if (loading.value) return
+  error.value = ''
+  const username = registerForm.username.trim()
+  if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) {
+    error.value = '用户名需为 3-20 位字母、数字或下划线'
+    return
+  }
+  if (registerForm.password.length < 6) {
+    error.value = '密码至少 6 位'
+    return
+  }
+  if (registerForm.password !== registerForm.confirm) {
+    error.value = '两次输入的密码不一致'
+    return
+  }
+  loading.value = true
+  try {
+    await auth.register(username, registerForm.password, registerForm.nickname.trim() || undefined)
+    ElMessage.success(`注册成功，欢迎，${auth.displayName}`)
+    redirectAfterLogin()
+  } catch (err: any) {
+    error.value = err?.message || '注册失败'
+  } finally {
+    loading.value = false
+  }
+}
+
 function fill(username: string) {
-  form.username = username
-  form.password = username === 'admin' ? 'admin123' : 'student123'
+  loginForm.username = username
+  loginForm.password = username === 'admin' ? 'admin123' : 'student123'
 }
 </script>

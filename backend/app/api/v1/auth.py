@@ -8,11 +8,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app.core.config import Settings
-from app.schemas.auth import LoginRequest, LoginResponse, LogoutResponse, UserInfo
+from app.schemas.auth import LoginRequest, LoginResponse, LogoutResponse, RegisterRequest, UserInfo
 from app.services.auth import (
     AuthUser,
+    RegistrationError,
     auth_tokens,
     authenticate,
+    register_user,
     require_user,
 )
 
@@ -36,6 +38,39 @@ def build_router(settings: Settings) -> APIRouter:
             ) from exc
         if user is None:
             raise HTTPException(status_code=401, detail="用户名或密码错误")
+        token, expires_in = auth_tokens.issue(user)
+        return LoginResponse(
+            token=token,
+            expires_in=expires_in,
+            user=UserInfo(
+                id=user.id,
+                username=user.username,
+                nickname=user.nickname,
+                role=user.role,
+            ),
+        )
+
+    @router.post(
+        "/auth/register",
+        response_model=LoginResponse,
+        status_code=201,
+        summary="学生自助注册（注册成功直接返回 token，默认 student 角色）",
+    )
+    async def register(payload: RegisterRequest):
+        try:
+            user = await asyncio.to_thread(
+                register_user,
+                settings,
+                payload.username,
+                payload.password,
+                payload.nickname,
+            )
+        except RegistrationError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=503, detail=f"注册服务暂不可用（MySQL 连接失败）：{exc}"
+            ) from exc
         token, expires_in = auth_tokens.issue(user)
         return LoginResponse(
             token=token,

@@ -9,6 +9,7 @@ import asyncio
 import json
 import sys
 import unittest
+import uuid
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -365,6 +366,53 @@ class AuthTests(unittest.TestCase):
             f"/api/v1/conversations/{conversation_id}", headers=self._headers(student)
         )
         self.assertEqual(denied.status_code, 404)
+
+    def test_register_flow_and_duplicate(self) -> None:
+        client = self._build_client()
+        username = "new" + uuid.uuid4().hex[:8]
+        payload = {"username": username, "password": "pass1234", "nickname": "新同学"}
+
+        response = client.post("/api/v1/auth/register", json=payload)
+        self.assertEqual(response.status_code, 201, response.text)
+        body = response.json()
+        self.assertEqual(body["user"]["role"], "student")
+        token = body["token"]
+
+        me = client.get("/api/v1/auth/me", headers=self._headers(token))
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(me.json()["username"], username)
+        self.assertEqual(me.json()["nickname"], "新同学")
+
+        login = client.post(
+            "/api/v1/auth/login", json={"username": username, "password": "pass1234"}
+        )
+        self.assertEqual(login.status_code, 200)
+
+        duplicate = client.post("/api/v1/auth/register", json=payload)
+        self.assertEqual(duplicate.status_code, 409)
+
+        weak = client.post(
+            "/api/v1/auth/register",
+            json={"username": "weak" + uuid.uuid4().hex[:8], "password": "123"},
+        )
+        self.assertEqual(weak.status_code, 422)
+
+        bad_name = client.post(
+            "/api/v1/auth/register", json={"username": "bad name!", "password": "pass1234"}
+        )
+        self.assertEqual(bad_name.status_code, 422)
+
+    def test_register_can_be_disabled(self) -> None:
+        settings = make_settings()
+        settings.auth_required = True
+        settings.allow_registration = False
+        services = build_services(settings)
+        services.llm = FakeLLM()
+        client = TestClient(create_app(settings, services=services))
+        response = client.post(
+            "/api/v1/auth/register", json={"username": "someone", "password": "pass1234"}
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 if __name__ == "__main__":

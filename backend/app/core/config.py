@@ -52,6 +52,7 @@ class Settings:
 
     # ---- 登录/鉴权（AUTH_REQUIRED=1 时所有业务接口必须带 Bearer token）----
     auth_required: bool = False
+    allow_registration: bool = True
 
     # ---- 编排参数（图引擎的循环/步数上限）----
     max_steps: int = 24
@@ -82,6 +83,8 @@ class Settings:
             llm_temperature=_env_float("LLM_TEMPERATURE", 0.2),
             llm_timeout=_env_float("LLM_TIMEOUT_SECONDS", 60.0),
             auth_required=os.getenv("AUTH_REQUIRED", "0").strip().lower()
+            in {"1", "true", "yes", "on"},
+            allow_registration=os.getenv("ALLOW_REGISTRATION", "1").strip().lower()
             in {"1", "true", "yes", "on"},
             max_steps=_env_int("MAX_STEPS", 24),
             max_retrieval_rounds=_env_int("MAX_RETRIEVAL_ROUNDS", 2),

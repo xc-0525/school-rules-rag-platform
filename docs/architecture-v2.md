@@ -4,9 +4,9 @@
 > **Day2 已完成**：真实 Qdrant（本地嵌入式）+ 本地 BGE、MySQL 9 表建库、问答落库、会话历史、点赞点踩；真实 DeepSeek 端到端跑通。
 > **Day3（提前）已完成**：校规文档解析入库流水线 + Neo4j 校规图谱，真实三库并行召回已联调。
 > **Day4 已完成**：Vue3 + Vite 前端（登录 / 问答 SSE / Agent 轨迹 / 来源引用 / 反馈 / 会话历史 / 文档管理）；
-> 登录鉴权：admin、student 两级角色 + Bearer token + 会话按用户隔离，管理员才能上传/删除文档。
+> 登录鉴权：admin、student 两级角色 + 学生自助注册 + Bearer token + 会话按用户隔离，管理员才能上传/删除文档。
 > 本轮回归修复（降级缓存、缓存失效、Neo4j 预检与回滚、引用校验、启动脚本解释器、driver 复用）。
-> 当前 **36 项自动化测试全过**；前端设计见 [`frontend-design.md`](frontend-design.md)。
+> 当前 **38 项自动化测试全过**；前端设计见 [`frontend-design.md`](frontend-design.md)。
 > 目标：1 周内交付可现场演示的课程答辩系统，之后平滑扩展为正常平台。
 > 注意：MySQL 暂不升级（5.5.11 → 8.0），脚本已兼容两者；升级安排在答辩后。
 
@@ -105,6 +105,7 @@ flowchart TD
 | `POST /api/v1/documents/upload` | 上传文档并入库（JSON：md/txt 文本 或 PDF 的 base64） |
 | `POST /api/v1/documents/upload-file` | multipart 文件上传（安装 python-multipart 后自动出现） |
 | `POST /api/v1/auth/login` | 登录（admin/admin123、student/student123），返回 Bearer token |
+| `POST /api/v1/auth/register` | 学生自助注册（默认 student 角色，注册成功返回 token） |
 | `GET /api/v1/auth/me` | 当前登录用户（前端校验 token） |
 | `POST /api/v1/auth/logout` | 退出登录（使 token 失效） |
 | `GET /api/v1/documents` | 文档列表（含分块数/状态） |
@@ -165,7 +166,7 @@ backend/
 | --- | --- | --- |
 | D1 | 图引擎 + 10+ 节点 + SSE trace + Mock 适配器 + 测试 | ✅ 完成 |
 | D2 | Qdrant 本地模式 + 本地 BGE 小语料入库；MySQL 9 表 + 落库 + 会话历史 + 反馈 | ✅ 完成 |
-| D3 | Vue3：登录页 + 问答（SSE/轨迹/来源/反馈）+ 会话历史 + 文档管理 + token 鉴权 | ✅ 完成 |
+| D3 | Vue3：登录/注册页 + 问答（SSE/轨迹/来源/反馈）+ 会话历史 + 文档管理 + token 鉴权 | ✅ 完成 |
 | D4 | 文档上传/列表/详情/删除 API；上传前依赖预检 + 失败回滚 + 缓存失效（本轮修复） | ✅ 完成 |
 | D5 | Neo4j 校规图谱灌入 + `GRAPH_MODE=neo4j` 联调（服务已在运行） | ✅ 完成（含文档入库流水线，真实三库联调通过） |
 | D6 | 全链路彩排 + 种子数据 + 一键兜底 | ⏳ |
@@ -174,7 +175,7 @@ backend/
 ## 8. 前端（Vue3 + Vite）
 
 - 代码：`frontend/`；启动：`scripts/start_frontend.ps1`（默认 <http://127.0.0.1:5173>，Vite 代理 `/api`、`/health` 到 8000）。
-- 页面：`/login` 登录、`/chat` 智能问答（SSE + Agent 轨迹 + 来源 + 反馈）、`/history` 会话历史、`/documents` 文档管理（管理员可写）、`/about` 运行状态。
+- 页面：`/login` 登录/注册、`/chat` 智能问答（SSE + Agent 轨迹 + 来源 + 反馈）、`/history` 会话历史、`/documents` 文档管理（管理员可写）、`/about` 运行状态。
 - 鉴权：前端登录后把 token 存 localStorage，所有 REST/SSE 请求带 `Authorization: Bearer <token>`；401 自动跳登录页。
 - SSE 事件映射与设计细节见 [`frontend-design.md`](frontend-design.md)；上传走 JSON（文本/base64），不依赖 python-multipart。
-- 权限：`admin/admin123` 可管理文档；`student/student123` 只能问答与查看自己的历史会话（后端按 token 用户隔离）。
+- 权限：`admin/admin123` 可管理文档；`student/student123` 只能问答与查看自己的历史会话；登录页支持学生自助注册（默认 student）。
