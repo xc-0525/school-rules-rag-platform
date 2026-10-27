@@ -45,6 +45,16 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             app.state.vector_ready = True
         yield
 
+        # 应用退出：关闭复用的 Neo4j driver / Qdrant 本地客户端
+        for service in (services.graph, services.vector):
+            close = getattr(service, "close", None)
+            if close is None:
+                continue
+            try:
+                close()
+            except Exception:  # noqa: BLE001
+                pass
+
     app = FastAPI(
         title=f"{settings.app_name} · v2",
         version=settings.version,

@@ -14,7 +14,12 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.services.pdf_parser import PDFTextError, extract_pdf_text, parse_pdf_bytes  # noqa: E402
-from app.services.ocr_parser import OCRUnavailableError, ocr_available, ocr_pdf_bytes  # noqa: E402
+from app.services.ocr_parser import (  # noqa: E402
+    OCRUnavailableError,
+    normalize_ocr_text,
+    ocr_available,
+    ocr_pdf_bytes,
+)
 from app.services.rules_parser import parse_text  # noqa: E402
 
 
@@ -78,6 +83,11 @@ class PDFParserTests(unittest.TestCase):
         with self.assertRaises(OCRUnavailableError) as ctx:
             ocr_pdf_bytes(b"%PDF-1.4 fake", "扫描件.pdf")
         self.assertIn("OCR", str(ctx.exception))
+
+    def test_normalize_ocr_text(self) -> None:
+        """OCR 在中文/数字间插入的空格应被去掉，保证「第N条」可被解析。"""
+        raw = "第1 条 图书馆 开放时间：1 0 册"
+        self.assertEqual(normalize_ocr_text(raw), "第1条图书馆开放时间：10册")
 
 
 if __name__ == "__main__":

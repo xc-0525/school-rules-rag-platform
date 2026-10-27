@@ -71,6 +71,10 @@ class IngestResult:
         )
 
 
+class GraphUnavailableError(RuntimeError):
+    """Neo4j 不可用 / 尚未启动。"""
+
+
 class RulesIngestor:
     """把校规文档同时写入三库。"""
 
@@ -92,6 +96,8 @@ class RulesIngestor:
             else None
         )
         self._client: Any = None
+        # 只有图谱模式为 neo4j 时才写图谱；mock 模式下上传不再强依赖 Neo4j
+        self.write_graph = settings.graph_mode == "neo4j"
 
     # ------------------------------------------------------------------ 入口
     def run(self, directory: str | Path, reset: bool = False) -> IngestResult:
@@ -101,9 +107,11 @@ class RulesIngestor:
             raise RuntimeError(f"目录中没有可解析的 .md/.txt 文档：{directory}")
 
         self.ensure_ready(reset=reset)
+        self.preflight()
         if reset:
             self._reset_mysql()
-            self._reset_neo4j()
+            if self.write_graph:
+                self._reset_neo4j()
 
         result = IngestResult(titles=[])
         for document in documents:
@@ -111,17 +119,39 @@ class RulesIngestor:
             result.documents += 1
             result.chunks += outcome["chunk_count"]
             result.qdrant_points += outcome["chunk_count"]
-            result.neo4j_rules += outcome["chunk_count"]
+            result.neo4j_rules += outcome["chunk_count"] if self.write_graph else 0
             assert result.titles is not None
             result.titles.append(document.title)
         return result
 
     def ingest_parsed(self, document: ParsedDocument, replace: bool = True) -> dict[str, Any]:
         """上传接口入口：入库单个已解析文档，返回 document_id 等信息。"""
-        self.ensure_ready()
+        self.preflight()
         if replace:
             self._delete_by_file_name(document.file_name)
         return self._ingest_document(document)
+
+    # ------------------------------------------------------------ 依赖预检
+    def preflight(self) -> None:
+        """入库前预检依赖，避免写完 MySQL/Qdrant 后才发现 Neo4j 不可用。"""
+        self.ensure_ready()
+        if self.write_graph:
+            self._check_neo4j()
+
+    def _check_neo4j(self) -> None:
+        from neo4j import GraphDatabase
+
+        driver = GraphDatabase.driver(self.neo4j_uri, auth=self.neo4j_auth)
+        try:
+            driver.verify_connectivity()
+        except Exception as exc:  # noqa: BLE001
+            raise GraphUnavailableError(
+                f"Neo4j 不可用（{self.neo4j_uri}）：{type(exc).__name__}。"
+                "请先启动 Neo4j（scripts/start_neo4j.ps1），"
+                "或把后端切到 GRAPH_MODE=mock 后重启再上传。"
+            ) from exc
+        finally:
+            driver.close()
 
     # ------------------------------------------------------------ 初始化
     def ensure_ready(self, reset: bool = False) -> None:
@@ -194,6 +224,8 @@ class RulesIngestor:
         return document_id
 
     def _delete_neo4j_document(self, document_id: int) -> None:
+        if not self.write_graph:
+            return
         from neo4j import GraphDatabase
 
         cypher = """
@@ -217,6 +249,8 @@ class RulesIngestor:
             session.commit()
 
     def _reset_neo4j(self) -> None:
+        if not self.write_graph:
+            return
         from neo4j import GraphDatabase
 
         driver = GraphDatabase.driver(self.neo4j_uri, auth=self.neo4j_auth)
@@ -264,30 +298,49 @@ class RulesIngestor:
                 )
             session.commit()
 
-        # 2) Qdrant：向量 + payload（payload 同时用于来源展示与图谱映射）
-        from qdrant_client.models import PointStruct
+        # 2) Qdrant +（可选）Neo4j；任一失败都回滚已写入的数据，避免半成品
+        try:
+            from qdrant_client.models import PointStruct
 
-        vectors = self.embedder.encode([chunk.content for chunk in document.chunks])
-        points = [
-            PointStruct(
-                id=point_id,
-                vector=vector,
-                payload={
-                    "document_id": document_id,
-                    "document": document.title,
-                    "file_name": document.file_name,
-                    "chapter": chunk.chapter,
-                    "article": chunk.article,
-                    "chunk_index": chunk.chunk_index,
-                    "content": chunk.content,
-                    "qdrant_point_id": point_id,
-                },
-            )
-            for chunk, vector, point_id in zip(document.chunks, vectors, point_ids)
-        ]
-        self._client.upsert(collection_name=self.collection, points=points)
+            vectors = self.embedder.encode([chunk.content for chunk in document.chunks])
+            points = [
+                PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload={
+                        "document_id": document_id,
+                        "document": document.title,
+                        "file_name": document.file_name,
+                        "chapter": chunk.chapter,
+                        "article": chunk.article,
+                        "chunk_index": chunk.chunk_index,
+                        "content": chunk.content,
+                        "qdrant_point_id": point_id,
+                    },
+                )
+                for chunk, vector, point_id in zip(document.chunks, vectors, point_ids)
+            ]
+            self._client.upsert(collection_name=self.collection, points=points)
 
-        # 3) Neo4j：文档 → 章节 → 条款 → 主题
+            if self.write_graph:
+                self._write_neo4j(document, document_id, point_ids)
+        except Exception:
+            self._cleanup_partial(document_id, point_ids)
+            raise
+
+        return {
+            "document_id": document_id,
+            "title": document.title,
+            "file_name": document.file_name,
+            "chunk_count": len(document.chunks),
+            "chapters": len({chunk.chapter for chunk in document.chunks}),
+            "point_ids": point_ids,
+        }
+
+    def _write_neo4j(
+        self, document: ParsedDocument, document_id: int, point_ids: list[str]
+    ) -> None:
+        """写入图谱：文档 → 章节 → 条款 → 主题。"""
         from neo4j import GraphDatabase
 
         cypher = """
@@ -332,11 +385,24 @@ class RulesIngestor:
         finally:
             driver.close()
 
-        return {
-            "document_id": document_id,
-            "title": document.title,
-            "file_name": document.file_name,
-            "chunk_count": len(document.chunks),
-            "chapters": len({chunk.chapter for chunk in document.chunks}),
-            "point_ids": point_ids,
-        }
+    def _cleanup_partial(self, document_id: int, point_ids: list[str]) -> None:
+        """入库失败时清理已写入的 MySQL / Qdrant / Neo4j 数据（尽力而为）。"""
+        if point_ids:
+            try:
+                self._client.delete(collection_name=self.collection, points_selector=point_ids)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[ingest] 清理 Qdrant 失败：{exc}")
+        try:
+            self._delete_neo4j_document(document_id)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ingest] 清理 Neo4j 失败：{exc}")
+        try:
+            from app.db.models import Document
+
+            with new_session(self.mysql_url) as session:
+                record = session.get(Document, document_id)
+                if record is not None:
+                    session.delete(record)
+                    session.commit()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ingest] 清理 MySQL 失败：{exc}")

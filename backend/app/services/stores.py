@@ -80,7 +80,11 @@ class MockGraphStore:
 
 
 class MockSemanticCache:
-    """进程内语义缓存（Day2 换成 MySQL + Qdrant 实现）。"""
+    """问题归一化缓存（精确匹配，非向量语义缓存）。
+
+    说明：当前只是把问题去掉标点/空格/转小写后做 dict 精确查找，
+    答辩时建议称呼为"问题归一化缓存"；真正的语义缓存需要 embedding 相似度。
+    """
 
     def __init__(self) -> None:
         self._data: dict[str, tuple[str, list[SourceItem]]] = {
@@ -98,6 +102,10 @@ class MockSemanticCache:
         if not answer:
             return
         self._data[normalize_question(query)] = (answer, list(sources))
+
+    def clear(self) -> None:
+        """清空缓存（文档上传/删除后调用，避免旧答案/旧来源继续命中）。"""
+        self._data.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +205,14 @@ class QdrantVectorStore:
             for hit in hits
         ]
 
+    def close(self) -> None:
+        """关闭本地 Qdrant 客户端（应用退出时调用）。"""
+        if self._client is not None:
+            try:
+                self._client.close()
+            finally:
+                self._client = None
+
 
 # 查询关键词：来自意图词典 + 查询扩展词典 + 校规高频词（中文小语料用包含匹配最稳）
 _GRAPH_TERMS: set[str] = set()
@@ -246,9 +262,26 @@ class Neo4jGraphStore:
         self.user = user
         self.password = password
         self.database = database
+        self._driver: Any = None
 
     def _auth(self) -> tuple[str, str] | None:
         return (self.user, self.password) if (self.user or self.password) else None
+
+    def _get_driver(self) -> Any:
+        """懒加载并复用 driver（避免每次检索都新建/关闭连接）。"""
+        if self._driver is None:
+            from neo4j import GraphDatabase
+
+            self._driver = GraphDatabase.driver(self.uri, auth=self._auth())
+        return self._driver
+
+    def close(self) -> None:
+        """应用退出时关闭 driver。"""
+        if self._driver is not None:
+            try:
+                self._driver.close()
+            finally:
+                self._driver = None
 
     async def search_paths(self, query: str, top_k: int = 2) -> list[Evidence]:
         return await asyncio.to_thread(self._search_sync, query, top_k)
@@ -257,8 +290,6 @@ class Neo4jGraphStore:
         keywords = extract_graph_keywords(query)
         if not keywords:
             return []
-
-        from neo4j import GraphDatabase
 
         cypher = """
         MATCH (d:RuleDocument)-[:HAS_CHAPTER]->(c:Chapter)-[:HAS_RULE]->(r:Rule)
@@ -274,12 +305,9 @@ class Neo4jGraphStore:
         ORDER BY hits DESC, document, article
         LIMIT $top_k
         """
-        driver = GraphDatabase.driver(self.uri, auth=self._auth())
-        try:
-            with driver.session(database=self.database) as session:
-                rows = session.run(cypher, keywords=keywords, top_k=top_k).data()
-        finally:
-            driver.close()
+        driver = self._get_driver()
+        with driver.session(database=self.database) as session:
+            rows = session.run(cypher, keywords=keywords, top_k=top_k).data()
 
         evidence: list[Evidence] = []
         for row in rows:

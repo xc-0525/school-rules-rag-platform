@@ -12,9 +12,21 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from app.services.rules_parser import ParsedDocument, parse_text
+
+_CJK = r"\u4e00-\u9fff"
+
+
+def normalize_ocr_text(text: str) -> str:
+    """去掉 OCR 在中文/数字之间插入的空格，让「第1 条」恢复为「第1条」。"""
+    text = re.sub(rf"(?<=[{_CJK}])\s+(?=[{_CJK}])", "", text)
+    text = re.sub(rf"(?<=[{_CJK}])\s+(?=\d)", "", text)
+    text = re.sub(rf"(?<=\d)\s+(?=[{_CJK}])", "", text)
+    text = re.sub(r"(?<=\d)\s+(?=\d)", "", text)
+    return text
 
 
 class OCRUnavailableError(RuntimeError):
@@ -68,6 +80,7 @@ def ocr_pdf_bytes(
     text = "\n\n".join(page_texts).strip()
     if not text:
         raise OCRUnavailableError("OCR 未识别到文字，请检查 PDF 清晰度或换用文字版 PDF。")
+    text = normalize_ocr_text(text)
 
     parsed = parse_text(text, fallback_title=Path(filename).stem)
     parsed.file_name = filename

@@ -22,8 +22,10 @@ from app.agents.runtime import WorkflowEngine  # noqa: E402
 from app.agents.state import AgentState  # noqa: E402
 from app.core.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.schemas.chat import Evidence  # noqa: E402
 from app.services.container import build_services  # noqa: E402
 from app.services.llm import DEFAULT_FAKE_ANSWER, FakeLLM  # noqa: E402
+from app.services.stores import MockSemanticCache  # noqa: E402
 from app.agents import nodes  # noqa: E402
 
 
@@ -130,6 +132,48 @@ class WorkflowEngineTests(unittest.TestCase):
         with self.assertRaises(Exception):
             asyncio.run(engine.run(AgentState(query="宿舍晚上几点熄灯？")))
 
+    def test_degraded_answer_not_cached(self) -> None:
+        """降级答案不能写进缓存（修复 #2 的回归测试）。"""
+        settings = make_settings()
+        services = build_services(settings)
+        services.llm = FakeLLM(DEFAULT_FAKE_ANSWER)  # 固定引用宿舍条例，考试问题会校验失败
+        nodes_spec, entry = build_graph(settings)
+        query = "考试时带手机进考场会怎么处理？"
+
+        engine_first = WorkflowEngine(nodes_spec, entry, services, settings)
+        first = asyncio.run(engine_first.run(AgentState(query=query)))
+        self.assertTrue(first.degraded, "第一次应因引用校验失败而降级")
+
+        engine_second = WorkflowEngine(nodes_spec, entry, services, settings)
+        second = asyncio.run(engine_second.run(AgentState(query=query)))
+        self.assertFalse(second.cached, "降级答案不应被缓存")
+        self.assertIn("generate_answer", engine_second.visited, "第二次应重新走生成，而不是命中缓存")
+
+    def test_grounding_accepts_plain_document_title(self) -> None:
+        """图谱证据标题带“知识图谱 · ”前缀时，引用校验不应误判（修复 #8）。"""
+        state = AgentState(
+            query="宿舍几点熄灯？",
+            answer="根据《测试校规》第6条，学生公寓每日23:30熄灯。",
+            evidence=[
+                Evidence(
+                    type="graph",
+                    title="知识图谱 · 测试校规",
+                    detail="第一章 · 第6条（主题：宿舍管理）",
+                    snippet="第6条 学生公寓每日23:30熄灯。",
+                )
+            ],
+        )
+        result = asyncio.run(nodes.verify_grounding(state, None))
+        self.assertTrue(result["grounding_ok"])
+
+    def test_cache_clear(self) -> None:
+        """缓存支持清空（上传/删除文档后调用，修复 #3）。"""
+        cache = MockSemanticCache()
+        cache.store("测试问题？", "测试答案", [])
+        self.assertIsNotNone(cache.lookup("测试问题？"))
+        cache.clear()
+        self.assertIsNone(cache.lookup("测试问题？"))
+
 
 class ApiTests(unittest.TestCase):
     """HTTP 层：非流式 / SSE 流式 / 图定义接口。"""
@@ -182,6 +226,16 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("content_base64", response.json()["detail"])
+
+    def test_openapi_contains_multipart_route_when_installed(self) -> None:
+        """安装 python-multipart 后，/documents/upload-file 应出现在 OpenAPI 中且不报错。"""
+        try:
+            import multipart  # noqa: F401
+        except ImportError:
+            self.skipTest("未安装 python-multipart")
+        schema = self.client.get("/openapi.json")
+        self.assertEqual(schema.status_code, 200)
+        self.assertIn("/api/v1/documents/upload-file", schema.json()["paths"])
 
     def test_chat_non_stream(self) -> None:
         response = self.client.post(

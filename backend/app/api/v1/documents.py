@@ -18,7 +18,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 
 from app.core.config import BASE_DIR, Settings
@@ -31,7 +31,7 @@ from app.schemas.document import (
     DocumentUploadResponse,
     UploadTextRequest,
 )
-from app.services.ingestion import RulesIngestor
+from app.services.ingestion import GraphUnavailableError, RulesIngestor
 from app.services.ocr_parser import OCRUnavailableError, ocr_pdf_bytes
 from app.services.pdf_parser import PDFTextError, parse_pdf_bytes
 from app.services.rules_parser import parse_file
@@ -163,6 +163,17 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
 
         require_real_ingestion()
 
+        # 先做依赖预检（Qdrant / BGE / Neo4j），避免写了一半才发现依赖不可用
+        ingestor = RulesIngestor(settings, vector_store=services.vector)
+        try:
+            await asyncio.to_thread(ingestor.preflight)
+        except GraphUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=503, detail=f"入库依赖预检失败：{type(exc).__name__}: {exc}"
+            ) from exc
+
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         target = UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
         target.write_bytes(raw)
@@ -201,14 +212,20 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
             )
         document.file_path = str(target)
 
-        ingestor = RulesIngestor(settings, vector_store=services.vector)
         try:
             result = await asyncio.to_thread(ingestor.ingest_parsed, document, replace)
+        except GraphUnavailableError as exc:
+            target.unlink(missing_ok=True)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
             target.unlink(missing_ok=True)
             raise HTTPException(
                 status_code=500, detail=f"入库失败：{type(exc).__name__}: {exc}"
             ) from exc
+
+        # 新文档入库后清空问题缓存，避免旧问题继续命中旧答案/旧来源
+        if hasattr(services.cache, "clear"):
+            services.cache.clear()
 
         return DocumentUploadResponse(
             document_id=result["document_id"],
@@ -249,7 +266,6 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
 
     # ---------------- multipart 上传（装了 python-multipart 后才出现） ----------------
     if HAS_MULTIPART:
-        from fastapi import File, Form, UploadFile
 
         @router.post(
             "/documents/upload-file",
@@ -300,6 +316,9 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         if not deleted:
             raise HTTPException(status_code=404, detail="文档不存在")
         _unlink_upload(data["file_path"])
+        # 删除文档后清空问题缓存，避免继续返回已删除文档的来源
+        if hasattr(services.cache, "clear"):
+            services.cache.clear()
         return DeleteResponse(deleted=True, document_id=document_id)
 
     return router

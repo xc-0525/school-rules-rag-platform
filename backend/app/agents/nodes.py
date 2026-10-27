@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.agents.runtime import NodeContext
@@ -175,11 +176,33 @@ async def generate_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]
 # ---------------------------------------------------------------------------
 # ⑨ 引用校验 Agent（选择 + 循环：不通过则重新生成）
 # ---------------------------------------------------------------------------
+ARTICLE_RE = re.compile(r"第[一二三四五六七八九十百零〇0-9]+条")
+GRAPH_TITLE_PREFIX = "知识图谱 · "
+
+
 async def verify_grounding(state: AgentState, ctx: NodeContext) -> dict[str, Any]:  # noqa: ARG001
-    answer = state.answer
-    titles = [item.title for item in state.evidence]
-    cited = any(title in answer for title in titles)
-    ok = cited and len(answer) >= 10
+    """引用校验：答案需引用证据的文档名或条款号。
+
+    注意：
+    - 图谱证据的标题带了"知识图谱 · "前缀，模型不会原样引用，匹配前要剥掉；
+    - 只看标题太弱，补充"条款号"匹配（如 第6条），降低误判为降级的概率。
+    """
+    answer = state.answer or ""
+    titles: list[str] = []
+    article_numbers: list[str] = []
+    for item in state.evidence:
+        title = item.title or ""
+        if title.startswith(GRAPH_TITLE_PREFIX):
+            title = title[len(GRAPH_TITLE_PREFIX):]
+        if title:
+            titles.append(title)
+        match = ARTICLE_RE.search(item.detail or "")
+        if match:
+            article_numbers.append(match.group(0))
+
+    cited_by_title = any(title in answer for title in titles)
+    cited_by_article = any(number in answer for number in article_numbers)
+    ok = (cited_by_title or cited_by_article) and len(answer) >= 10
     if ok:
         return {"grounding_ok": True}
     return {"grounding_ok": False, "regen_count": state.regen_count + 1}
@@ -201,6 +224,13 @@ async def degrade_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
 
 async def persist_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     conversation_id = await ctx.services.persistence.save_qa(state)
-    if not state.cached and not state.refused and state.answer:
+    # 只缓存"有引用校验通过"的正常答案：拒答、降级、缓存命中的结果都不写缓存
+    if (
+        not state.cached
+        and not state.refused
+        and not state.degraded
+        and state.grounding_ok
+        and state.answer
+    ):
         ctx.services.cache.store(state.query, state.answer, state.sources)
     return {"conversation_id": conversation_id}

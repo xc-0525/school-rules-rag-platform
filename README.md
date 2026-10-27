@@ -29,9 +29,9 @@
 | v2 MySQL 落库 / 会话历史 / 点赞点踩 | ✅ 9 张表 + 真实 DeepSeek 全链路通过 | [`backend/app/services/persistence.py`](backend/app/services/persistence.py) |
 | v2 真实 Neo4j 图谱 | ✅ 已灌入样例手册（1 文档 / 8 章节 / 26 条款 / 7 主题），双路召回已验证 | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
 | 校规文档入库流水线 | ✅ 解析 → MySQL → BGE → Qdrant → Neo4j（命令行 + 上传接口） | [`backend/scripts/ingest_rules.py`](backend/scripts/ingest_rules.py) |
-| 文档上传 / 列表 / 详情 / 删除 API | ✅ `.md/.txt` + 文字版 PDF（base64）；扫描件自动走 OCR（装引擎后） | [`backend/app/api/v1/documents.py`](backend/app/api/v1/documents.py) |
+| 文档上传 / 列表 / 详情 / 删除 API | ✅ `.md/.txt` + 文字版 PDF（base64）；扫描件自动 OCR（已实测，单页约 8s） | [`backend/app/api/v1/documents.py`](backend/app/api/v1/documents.py) |
 | 校规样例文档 | ✅ 已提供（虚构样例，替换真实文档后重跑入库即可） | [`rules/学生手册节选.md`](rules/学生手册节选.md) |
-| Vue3 前端（问答 / 轨迹 / 历史 / 文档） | 📋 开发中（D3） | `frontend/`（规划） |
+| Vue3 前端（问答 / 轨迹 / 历史 / 文档） | ✅ 已完成：SSE 流式问答 + Agent 轨迹 + 来源引用 + 会话历史 + 文档管理 | [`frontend/`](frontend/) |
 | 数据库建表脚本 | ✅ 已补齐，兼容 MySQL 5.5 / 8.0 | [`sql/init_mysql.sql`](sql/init_mysql.sql) |
 
 **答辩演示启动顺序**：
@@ -47,21 +47,27 @@ python scripts/ingest_rules.py --dir ../rules --reset
 # 3) 启动后端（使用全局 Python；同样需要等 BGE 预热）
 cd ..
 powershell -ExecutionPolicy Bypass -File .\scripts\start_backend.ps1
-# Swagger: http://127.0.0.1:8000/docs
+
+# 4) 启动前端（另开窗口；Vite 代理到 8000）
+powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
+# 浏览器：http://127.0.0.1:5173
 ```
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
-> 当前测试：**28 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验）；
+> 当前测试：**33 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由）；
 > 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
+> 本轮已修复：降级答案不再进缓存、文档上传/删除后清空缓存、上传前预检 Neo4j 并在失败时回滚半成品、
+> 图谱标题引用校验误判、启动脚本固定全局 Python。
 
 ### ⚠️ 已知限制与待补事项
 
 1. **校规内容为虚构样例**：`rules/学生手册节选.md` 只用于跑通链路，拿到学校真实文件后替换并重新入库即可；
-2. **扫描件 PDF 需要 OCR 引擎**：OCR 代码已接入（上传空白文字层 PDF 时会自动尝试），但本机尚未安装
-   OCR 引擎；执行 `pip install rapidocr_onnxruntime pillow` 后自动生效；
-3. **Vue3 前端尚未开始**：当前只有 FastAPI + 极简演示页，前端是 D3 任务；
-4. **Swagger UI 中的流式响应是“一次性显示”的**：想看打字机效果请用演示页或 `curl -N`；
-5. 本地 MySQL 是 **5.5.11**（较老），脚本已做兼容；答辩后再评估升级 8.0。
+2. **扫描件 OCR 已可用但建议人工抽查**：`rapidocr_onnxruntime` + Pillow 已安装，实测单页约 8 秒；
+   OCR 可能把「第1条」识别成「第1 条」（已做文本归一化修正），但真实扫描件的错字/页眉页脚仍需入库前抽查；
+3. **尚无登录鉴权**：演示固定使用 `user_id=1`，文档删除/会话接口未做身份校验，答辩若被追问需说明是下一阶段；
+4. **Swagger UI 中的流式响应是“一次性显示”的**：想看打字机效果请用前端 <http://127.0.0.1:5173> 或 `curl -N`；
+5. **“语义缓存”实际是问题归一化 + 精确匹配**：答辩时建议称“问题归一化缓存”，真正的向量语义缓存是后续计划；
+6. 本地 MySQL 是 **5.5.11**（较老），脚本已做兼容；答辩后再评估升级 8.0。
 
 ---
 
@@ -84,7 +90,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_backend.ps1
   - 证据约束提示词，答案只能基于召回的条款片段生成；
   - 每条回答附带来源引用（文档、章节、分块 ID），支持逐条核对；
   - 对无证据支撑的问题触发"**拒答并引导人工咨询**"机制，杜绝编造。
-- **高频问题语义缓存**：对高频问题做语义级缓存，命中即返回，显著降低 DeepSeek 调用延迟与成本。
+- **高频问题归一化缓存**：对高频问题去掉标点/空格/大小写差异后精确匹配，命中即返回，降低 DeepSeek 调用延迟与成本（真正的向量语义缓存为后续计划）。
 - **完整业务闭环**：多轮会话、问答记录、点赞/点踩反馈、文档上传与处理状态跟踪、标签分类、管理员公告、学生/管理员角色权限。
 
 ## 三、系统架构
@@ -415,8 +421,8 @@ curl -X POST http://127.0.0.1:8000/api/v1/documents/upload \
 `DELETE /api/v1/documents/{id}`（同时清理 Qdrant 向量与 Neo4j 图谱）。
 Swagger <http://127.0.0.1:8000/docs> 里也能直接测。
 
-> 安装了 `python-multipart` 后，会**自动多出**标准文件上传接口
-> `POST /api/v1/documents/upload-file`（multipart：file / title / replace）。
+> `python-multipart` 已安装，所以 `POST /api/v1/documents/upload-file`（multipart：file / title / replace）
+> 也在 Swagger 里可用；前端仍走 JSON 上传，不强依赖 multipart。
 
 **PDF / OCR 依赖说明（也就是"为什么要不要装 python-multipart"）**
 
@@ -457,13 +463,23 @@ python scripts/ingest_rules.py --dir ../rules --reset
 > 仓库内 `rules/学生手册节选.md`（26 条）和 `rules/校园服务指南节选.md`（16 条）都是虚构样例；
 > 当前库内为 2 份文档 / 42 个条款（Qdrant 42 个向量、Neo4j 42 个条款节点）。
 
-### 6.7 前端启动（规划中）
+### 6.7 前端启动（Vue3 + Vite）
 
-```bash
+```powershell
+# 推荐：脚本启动（会自动检查 node_modules，缺失时先 npm install）
+powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
+
+# 或手动
 cd frontend
 npm install
 npm run dev
 ```
+
+- 开发地址：<http://127.0.0.1:5173>，Vite 已把 `/api`、`/health` 代理到 `127.0.0.1:8000`；
+- 页面：**智能问答**（SSE 流式回答 + Agent 轨迹 + 来源引用 + 点赞点踩）、**会话历史**、
+  **文档管理**（上传 `.md/.txt/.pdf`、列表、删除）、**关于与状态**（运行模式 / 图节点 / 演示要点）；
+- 生产构建：`npm run build`，产物在 `frontend/dist/`；
+- 前端设计说明见 [`docs/frontend-design.md`](docs/frontend-design.md)。
 
 ## 七、项目结构
 
@@ -482,22 +498,30 @@ school-rules-rag-platform/
 │   │   ├── services/        #   LLM / Qdrant+BGE / Neo4j / MySQL / 语义缓存适配器
 │   │   ├── db/              #   SQLAlchemy 模型与引擎
 │   │   └── schemas/         #   Pydantic 模型
-│   ├── tests/               # ✅ 28 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j）
+│   ├── tests/               # ✅ 33 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 缓存/引用/OCR 回归）
 │   ├── scripts/
 │   │   └── ingest_rules.py  # ✅ 校规文档入库（MySQL + Qdrant + Neo4j）
 │   └── data/                #   本地 Qdrant 数据（已 gitignore）
 ├── rules/                   # ✅ 校规文档目录（当前为虚构样例，替换为真实文件）
 │   ├── 学生手册节选.md
 │   └── README.md
-├── frontend/                # 📋 Vue3 前端（D3 开发中）
+├── frontend/                # ✅ Vue3 + Vite 前端
+│   ├── src/
+│   │   ├── api/             #   SSE 解析 + REST 客户端
+│   │   ├── components/      #   消息气泡 / Agent 轨迹 / 来源引用
+│   │   ├── stores/          #   Pinia 会话状态
+│   │   └── views/           #   问答 / 历史 / 文档 / 关于
+│   └── vite.config.ts       #   /api、/health 代理到 8000
 ├── sql/
 │   └── init_mysql.sql       # ✅ 建表 + 种子数据（兼容 MySQL 5.5 / 8.0）
 ├── scripts/
 │   ├── start_neo4j.ps1      # ✅ 启动本机 Neo4j
 │   ├── start_neo4j.cmd
-│   └── start_backend.ps1    # ✅ 一键启动 v2（真实 Qdrant + Neo4j + DeepSeek）
+│   ├── start_backend.ps1    # ✅ 一键启动 v2（固定全局 Python + 真实三库 + DeepSeek）
+│   └── start_frontend.ps1   # ✅ 启动 Vue3 前端（自动检查 npm install）
 ├── docs/
-│   └── architecture-v2.md   # ✅ v2 架构 / 图设计 / 排期
+│   ├── architecture-v2.md   # ✅ v2 架构 / 图设计 / 排期
+│   └── frontend-design.md   # ✅ 前端设计说明（页面 / SSE / 上传）
 ├── LICENSE
 └── README.md
 ```
@@ -517,20 +541,22 @@ school-rules-rag-platform/
   - 校规文档入库流水线：解析切分 → MySQL 记录 → BGE 向量 → Qdrant → Neo4j；支持命令行批量入库与 HTTP 上传接口；
   - 真实 MySQL 落库 + 会话历史 + 点赞点踩 API；
   - 真实 DeepSeek（deepseek-chat）端到端跑通；
-  - PDF 文字版上传（base64）+ 扫描件 OCR 自动回退（装 OCR 引擎后生效）
-  - 28 项自动化测试全过
+  - PDF 文字版上传（base64）+ 扫描件 OCR 自动识别（已实测：单页约 8 秒，含「第N条」归一化）；
+  - **Vue3 + Vite 前端**：SSE 流式问答、Agent 轨迹面板、来源引用、点赞点踩、会话历史、文档管理；
+  - **本轮回归修复**：降级答案不进缓存、上传/删除后清空缓存、上传前 Neo4j 预检 + 失败回滚、
+    图谱证据标题引用校验、启动脚本固定全局 Python、Neo4j driver 复用、multipart 路由 OpenAPI 修复；
+  - 33 项自动化测试全过
 
 ### 🚧 进行中
 
-- Vue3 前端：问答（SSE / Agent 轨迹 / 来源引用 / 反馈）+ 会话历史 + 文档管理（上传页对接 `/api/v1/documents/upload`）
-- 扫描件 OCR 实测与人工校对流程（OCR 代码已就绪，待安装引擎后验证）
-- DOCX 解析、标准 multipart 文件上传（安装 python-multipart 后自动启用）
+- 扫描件 OCR 人工校对流程（识别已可用，真实文件入库前仍需抽查）
+- DOCX 解析（当前支持 `.md/.txt/.pdf`）
 
 ### 📋 后续计划
 
-- 登录鉴权与角色权限（学生 / 管理员）
+- 登录鉴权与角色权限（学生 / 管理员）——前端登录页 + 后端 token 校验
 - 证据约束生成评测（命中率、拒答准确率、响应延迟）
-- 高频问题语义缓存（接入 Qdrant）
+- 真正的问题语义缓存（embedding 相似度，当前是归一化精确匹配）
 - 文档管理后台、标签、公告模块
 - 真实校规文档替换 `rules/` 样例并重新入库
 - 答辩材料：PPT、实验报告、演示视频
