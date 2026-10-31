@@ -1,4 +1,7 @@
-# v2 架构设计（课程答辩版）
+# 校园服务智能问答系统 · v2 架构设计（课程答辩版）
+
+> 题目定稿：《基于 FastAPI 和 Vue 的校园服务智能问答系统的设计与实现》
+> （原题目《基于 RAG 与多智能体协作的校纪校规问答平台》；名称变更与选题口径见 [`选题与名称记录.md`](选题与名称记录.md)。）
 
 > 状态：**Day1 已完成**（图引擎 + 10+ 节点 + SSE 轨迹 + Mock 适配器）
 > **Day2 已完成**：真实 Qdrant（本地嵌入式）+ 本地 BGE、MySQL 9 表建库、问答落库、会话历史、点赞点踩；真实 DeepSeek 端到端跑通。
@@ -104,7 +107,7 @@ flowchart TD
 | `POST /api/v1/messages/{id}/feedback` | 点赞 / 点踩 |
 | `POST /api/v1/documents/upload` | 上传文档并入库（JSON：md/txt 文本 或 PDF 的 base64） |
 | `POST /api/v1/documents/upload-file` | multipart 文件上传（安装 python-multipart 后自动出现） |
-| `POST /api/v1/auth/login` | 登录（admin/admin123、student/student123），返回 Bearer token |
+| `POST /api/v1/auth/login` | 登录（演示账号与初始密码见项目交付说明），返回 Bearer token |
 | `POST /api/v1/auth/register` | 学生自助注册（默认 student 角色，注册成功返回 token） |
 | `GET /api/v1/auth/me` | 当前登录用户（前端校验 token） |
 | `POST /api/v1/auth/logout` | 退出登录（使 token 失效） |
@@ -178,4 +181,4 @@ backend/
 - 页面：`/login` 登录/注册、`/chat` 智能问答（SSE + Agent 轨迹 + 来源 + 反馈）、`/history` 会话历史、`/documents` 文档管理（管理员可写）、`/about` 运行状态。
 - 鉴权：前端登录后把 token 存 localStorage，所有 REST/SSE 请求带 `Authorization: Bearer <token>`；401 自动跳登录页。
 - SSE 事件映射与设计细节见 [`frontend-design.md`](frontend-design.md)；上传走 JSON（文本/base64），不依赖 python-multipart。
-- 权限：`admin/admin123` 可管理文档；`student/student123` 只能问答与查看自己的历史会话；登录页支持学生自助注册（默认 student）。
+- 权限：`admin` 可管理文档；`student` 只能问答与查看自己的历史会话；登录页支持学生自助注册（默认 student）；演示账号初始密码见交付说明。

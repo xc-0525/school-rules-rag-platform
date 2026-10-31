@@ -35,7 +35,7 @@ class Settings:
     现场演示时任何外部依赖不可用，都可以切回 mock，保证答辩不翻车。
     """
 
-    app_name: str = "校纪校规问答平台"
+    app_name: str = "校园服务智能问答系统"
     version: str = "0.2.0-course"
 
     # ---- 存储 / 模型开关 ----

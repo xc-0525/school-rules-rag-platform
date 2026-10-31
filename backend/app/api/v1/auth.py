@@ -25,7 +25,7 @@ def build_router(settings: Settings) -> APIRouter:
     @router.post(
         "/auth/login",
         response_model=LoginResponse,
-        summary="登录（admin/admin123 或 student/student123）",
+        summary="登录（演示账号与初始密码见项目交付说明）",
     )
     async def login(payload: LoginRequest):
         try:

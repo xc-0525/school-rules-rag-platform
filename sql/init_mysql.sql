@@ -1,5 +1,5 @@
 -- ============================================================================
--- 校纪校规问答平台 · MySQL 初始化脚本
+-- 校园服务智能问答系统 · MySQL 初始化脚本
 -- 兼容 MySQL 5.5+（本机为 5.5.11）与 MySQL 8.0：
 --   * 不使用 JSON 类型（sources 用 MEDIUMTEXT 存 JSON 字符串）
 --   * 排序规则用 utf8mb4_general_ci（5.5 可用，8.0 也兼容）
@@ -168,8 +168,8 @@ CREATE TABLE IF NOT EXISTS document_tag_relations (
 -- 初始化数据
 -- ============================================================================
 
--- 用户：admin / admin123（管理员），student / student123（学生）
--- 密码为 PBKDF2-SHA256，格式：pbkdf2_sha256$迭代次数$salt(base64)$hash(base64)
+-- 用户：admin（管理员）、student（演示学生）
+-- 密码为 PBKDF2-SHA256 哈希（初始密码见项目交付说明，不写入仓库）
 INSERT INTO users (username, password, nickname, role, status)
 SELECT 'admin',
        'pbkdf2_sha256$120000$+9CXBlRIpa16zcV95Rmgmw==$b6Dl0J92N3ov3n16MK9VYAyIEFYfqkAt+BCwcwrTfVI=',

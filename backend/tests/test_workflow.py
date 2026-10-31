@@ -26,6 +26,7 @@ from app.main import create_app  # noqa: E402
 from app.schemas.chat import Evidence  # noqa: E402
 from app.services.container import build_services  # noqa: E402
 from app.services.llm import DEFAULT_FAKE_ANSWER, FakeLLM  # noqa: E402
+from app.services.auth import AuthUser, auth_tokens  # noqa: E402
 from app.services.stores import MockSemanticCache  # noqa: E402
 from app.agents import nodes  # noqa: E402
 
@@ -308,28 +309,40 @@ class AuthTests(unittest.TestCase):
         services.llm = FakeLLM()
         return TestClient(create_app(settings, services=services))
 
-    def _login(self, client: TestClient, username: str, password: str) -> str:
-        response = client.post(
-            "/api/v1/auth/login", json={"username": username, "password": password}
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        return response.json()["token"]
-
     @staticmethod
     def _headers(token: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {token}"}
 
+    @staticmethod
+    def _token_for(user_id: int, username: str, role: str) -> str:
+        """测试直接签发 token（避免在仓库中保存演示账号密码）。"""
+        token, _ = auth_tokens.issue(
+            AuthUser(id=user_id, username=username, nickname=username, role=role)
+        )
+        return token
+
     def test_login_me_logout(self) -> None:
         client = self._build_client()
-        token = self._login(client, "admin", "admin123")
+        username = "login" + uuid.uuid4().hex[:8]
+        password = "testpass_" + uuid.uuid4().hex[:6]
+        registered = client.post(
+            "/api/v1/auth/register", json={"username": username, "password": password}
+        )
+        self.assertEqual(registered.status_code, 201, registered.text)
+        token = registered.json()["token"]
 
         me = client.get("/api/v1/auth/me", headers=self._headers(token))
         self.assertEqual(me.status_code, 200)
-        self.assertEqual(me.json()["username"], "admin")
-        self.assertEqual(me.json()["role"], "admin")
+        self.assertEqual(me.json()["username"], username)
+        self.assertEqual(me.json()["role"], "student")
+
+        login = client.post(
+            "/api/v1/auth/login", json={"username": username, "password": password}
+        )
+        self.assertEqual(login.status_code, 200, login.text)
 
         wrong = client.post(
-            "/api/v1/auth/login", json={"username": "admin", "password": "bad-password"}
+            "/api/v1/auth/login", json={"username": username, "password": "bad-password"}
         )
         self.assertEqual(wrong.status_code, 401)
 
@@ -347,7 +360,7 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(client.get("/api/v1/conversations").status_code, 401)
         self.assertEqual(client.get("/health").status_code, 200)
 
-        admin = self._login(client, "admin", "admin123")
+        admin = self._token_for(1, "admin", "admin")
         chat = client.post(
             "/api/v1/chat",
             json={"query": "宿舍晚上几点熄灯？", "stream": False},
@@ -356,7 +369,7 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(chat.status_code, 200, chat.text)
 
         # 学生不能上传文档（管理员可以，mock 模式下再被 400 拒绝）
-        student = self._login(client, "student", "student123")
+        student = self._token_for(2, "student", "student")
         payload = {"filename": "demo.md", "content": "# demo\n\n第1条 测试"}
         self.assertEqual(
             client.post("/api/v1/documents/upload", json=payload, headers=self._headers(student)).status_code,
@@ -370,8 +383,8 @@ class AuthTests(unittest.TestCase):
 
     def test_conversation_isolation_between_users(self) -> None:
         client = self._build_client()
-        admin = self._login(client, "admin", "admin123")
-        student = self._login(client, "student", "student123")
+        admin = self._token_for(1, "admin", "admin")
+        student = self._token_for(2, "student", "student")
 
         chat = client.post(
             "/api/v1/chat",

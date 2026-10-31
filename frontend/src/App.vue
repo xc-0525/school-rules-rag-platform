@@ -6,7 +6,7 @@
       <div class="brand">
         <div class="brand-logo">规</div>
         <div>
-          <div class="brand-title">校纪校规问答</div>
+          <div class="brand-title">校园服务智能问答</div>
           <div class="brand-sub">RAG · 多智能体协作</div>
         </div>
       </div>
@@ -47,7 +47,7 @@
 
     <el-container>
       <el-header class="app-header">
-        <div class="page-title">{{ route.meta.title || '校纪校规问答' }}</div>
+        <div class="page-title">{{ route.meta.title || '校园服务智能问答' }}</div>
         <div class="header-right">
           <el-tag v-if="health" :type="health.status === 'ok' ? 'success' : 'danger'" effect="light" round>
             后端 {{ health.status }}

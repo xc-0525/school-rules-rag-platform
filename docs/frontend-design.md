@@ -27,7 +27,8 @@
 
 ## 3. 登录鉴权
 
-- 登录：`POST /api/v1/auth/login` → 返回 token + 用户信息；`admin/admin123`（管理员）、`student/student123`（学生）。
+- 登录：`POST /api/v1/auth/login` → 返回 token + 用户信息；演示账号 `admin`（管理员）、`student`（学生），
+  初始密码见项目交付说明（不写入仓库）。
 - 注册：`POST /api/v1/auth/register`（用户名 3-20 位字母/数字/下划线，密码 ≥6 位），默认 student 角色，
   注册成功直接返回 token 自动登录；`ALLOW_REGISTRATION=0` 可关闭注册（前端仍显示 tab，后端返回 403）。
 - 前端：token 存 localStorage，`api/client.ts` 的所有 REST 请求和 `api/sse.ts` 的 SSE 请求都会自动带

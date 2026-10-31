@@ -1,4 +1,4 @@
-# 基于 RAG 与多智能体协作的校纪校规问答平台
+# 基于 FastAPI 和 Vue 的校园服务智能问答系统的设计与实现
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -9,7 +9,8 @@
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
 > 毕业设计（2026.09 - 至今）· 独立开发
-> 面向高校学生的校纪校规垂直领域问答平台：以 **GraphRAG + 多智能体协作** 为核心，融合向量语义召回与知识图谱多跳推理，并通过证据约束机制抑制大模型幻觉。
+> **题目定稿：《基于 FastAPI 和 Vue 的校园服务智能问答系统的设计与实现》**（原题目《基于 RAG 与多智能体协作的校纪校规问答平台》，变更记录见 [`docs/选题与名称记录.md`](docs/选题与名称记录.md)）。
+> 面向高校学生的校园服务垂直领域问答系统（以校纪校规为核心语料，覆盖图书馆、食堂、校园卡、医疗、心理、就业、场馆等校园服务事项）：以 **GraphRAG + 多智能体协作** 为核心，融合向量语义召回与知识图谱多跳推理，并通过证据约束机制抑制大模型幻觉。
 
 🔗 项目地址：<https://github.com/xc-0525/school-rules-rag-platform>
 
@@ -52,7 +53,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_backend.ps1
 # 4) 可选：前端开发模式（改前端代码/热更新时用；日常演示直接用 8000 即可）
 powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 # 浏览器：http://127.0.0.1:5173
-# 演示账号：admin / admin123（管理员）、student / student123（学生）
+# 演示账号：admin（管理员）、student（学生）；初始密码见项目交付说明，不写入仓库
 # 登录页也支持自助注册（默认学生角色），可用新账号演示"自己的历史会话"
 ```
 
@@ -82,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 
 ## 一、项目背景
 
-学生在查询校纪校规时长期面临三类痛点：
+学生在查询校园服务信息与校纪校规时长期面临三类痛点：
 
 1. **信息分散** —— 规定散落在学籍管理、违纪处分、奖助学金、宿舍管理等多份 PDF/Word 文档中，缺乏统一入口；
 2. **检索低效** —— 关键词检索难以匹配语义相近的表述，人工翻阅成本高；
@@ -210,7 +211,7 @@ erDiagram
 
 | # | 表名 | 说明 | 关键字段 |
 | --- | --- | --- | --- |
-| 1 | `users` | 用户表 | `username` 唯一、`password`（bcrypt）、`role`（student/admin）、`status` |
+| 1 | `users` | 用户表 | `username` 唯一、`password`（PBKDF2-SHA256）、`role`（student/admin）、`status` |
 | 2 | `conversations` | 会话表（一次连续多轮问答） | `user_id`、`title`、`updated_at` |
 | 3 | `messages` | 问答记录表 | `role`、`content`、`sources`（来源 JSON）、`tokens` |
 | 4 | `documents` | 校规文档表（PDF/Word/TXT） | `file_path`、`chunk_count`、`status`（pending/processing/done/failed） |
@@ -225,7 +226,8 @@ erDiagram
 
 ### 5.4 初始化数据
 
-- 默认账号：`admin` / `admin123`（管理员）、`student` / `student123`（学生）；密码为 PBKDF2-SHA256 哈希（见 `app/core/security.py`），**上线前请务必修改密码**
+- 默认账号：`admin`（管理员）、`student`（学生）；密码为 PBKDF2-SHA256 哈希（见 `app/core/security.py`），
+  初始密码见项目交付说明、不写入仓库，**上线前请务必修改密码**
 - 默认文档标签：学籍管理、违纪处分、奖助学金、宿舍管理、教学管理、校园安全
 
 ## 六、快速开始
@@ -390,7 +392,7 @@ NEO4J_USER=
 NEO4J_PASSWORD=
 
 # DeepSeek
-DEEPSEEK_API_KEY=sk-xxxx
+DEEPSEEK_API_KEY=sk-REPLACE_ME
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
 

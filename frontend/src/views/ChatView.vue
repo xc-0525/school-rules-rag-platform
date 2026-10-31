@@ -15,7 +15,7 @@
       <div v-if="!store.messages.length" class="welcome">
         <h2>问点什么？</h2>
         <p>
-          系统会同时检索 <b>Qdrant 向量库</b> 与 <b>Neo4j 校规图谱</b>，
+          系统会同时检索 <b>Qdrant 向量库</b> 与 <b>Neo4j 知识图谱</b>，
           经证据融合、充分性判定后，由 DeepSeek 生成带条款来源的回答。
         </p>
         <div class="examples">

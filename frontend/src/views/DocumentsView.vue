@@ -2,7 +2,7 @@
   <div class="panel panel-pad" style="height: calc(100vh - 60px - 36px); overflow-y: auto">
     <div class="detail-head">
       <div>
-        <div class="panel-title" style="margin-bottom: 4px">校规文档管理</div>
+        <div class="panel-title" style="margin-bottom: 4px">校园服务文档管理</div>
         <div class="muted">上传后自动解析「第X章 / 第N条」，写入 MySQL 元数据、Qdrant 向量和 Neo4j 图谱</div>
       </div>
       <div class="document-actions">

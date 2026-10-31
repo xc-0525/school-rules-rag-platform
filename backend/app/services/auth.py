@@ -1,7 +1,8 @@
 """登录鉴权（演示级实现）。
 
-- 账号：MySQL `users` 表（sql/init_mysql.sql 种了 admin/admin123、student/student123）；
-  未配置 MySQL（Mock 模式）时用内置的同款演示账号兜底。
+- 账号：MySQL `users` 表（sql/init_mysql.sql 预置 admin / student 两个账号，
+  初始密码见项目交付说明，不写入仓库）；未配置 MySQL（Mock 模式）时，
+  可通过环境变量 DEMO_ADMIN_PASSWORD / DEMO_STUDENT_PASSWORD 配置演示账号。
 - token：进程内随机 token（8 小时有效）；服务重启后需重新登录。
 - 未上 JWT/Redis，原因是课程演示单进程即可；接口与前端已按 Bearer token 对接，
   后续换成 JWT 只需替换 issue/resolve 两个方法。
@@ -9,6 +10,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 import threading
@@ -24,12 +26,20 @@ from app.core.security import hash_password, verify_password
 TOKEN_TTL_SECONDS = 8 * 60 * 60
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 
-# Mock 模式兜底账号（与 sql/init_mysql.sql 的种子账号一致）
-_DEMO_USERS: dict[str, tuple[str, str, int, str]] = {
-    # username: (password, nickname, id, role)
-    "admin": ("admin123", "管理员", 1, "admin"),
-    "student": ("student123", "演示学生", 2, "student"),
-}
+# 保留用户名：管理员/学生演示账号不开放自助注册（密码不在仓库中出现）
+_RESERVED_USERNAMES = {"admin", "student"}
+
+
+def _demo_users() -> dict[str, tuple[str, str, int, str]]:
+    """Mock 模式下的演示账号（密码从环境变量读取；未配置则不可用）。"""
+    users: dict[str, tuple[str, str, int, str]] = {}
+    admin_password = os.getenv("DEMO_ADMIN_PASSWORD", "").strip()
+    student_password = os.getenv("DEMO_STUDENT_PASSWORD", "").strip()
+    if admin_password:
+        users["admin"] = (admin_password, "管理员", 1, "admin")
+    if student_password:
+        users["student"] = (student_password, "演示学生", 2, "student")
+    return users
 
 # Mock 模式下注册的用户（仅进程内有效；真实 MySQL 模式会写 users 表）
 _registered_users: dict[str, dict[str, object]] = {}
@@ -131,7 +141,7 @@ def authenticate(settings: Settings, username: str, password: str) -> AuthUser |
             role=str(user.role or "student"),
         )
 
-    demo = _DEMO_USERS.get(username)
+    demo = _demo_users().get(username)
     if demo is not None:
         demo_password, nickname, user_id, role = demo
         if not secrets.compare_digest(demo_password, password):
@@ -210,7 +220,7 @@ def register_user(
 
     global _registered_seq
     with _registered_lock:
-        if username in _DEMO_USERS or username in _registered_users:
+        if username in _RESERVED_USERNAMES or username in _registered_users:
             raise RegistrationError(409, "用户名已被注册")
         _registered_seq += 1
         user_id = _registered_seq

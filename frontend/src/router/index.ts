@@ -51,7 +51,7 @@ router.beforeEach((to) => {
 })
 
 router.afterEach((to) => {
-  document.title = `${to.meta.title || '校纪校规问答'} · 校纪校规问答平台`
+  document.title = `${to.meta.title || '校园服务智能问答'} · 校园服务智能问答系统`
 })
 
 export default router

@@ -4,7 +4,7 @@
       <div class="login-brand">
         <div class="brand-logo">规</div>
         <div>
-          <div class="brand-title">校纪校规问答平台</div>
+          <div class="brand-title">校园服务智能问答系统</div>
           <div class="brand-sub">RAG · 多智能体协作 · 课程答辩版</div>
         </div>
       </div>
@@ -13,13 +13,13 @@
         <el-tab-pane label="登 录" name="login">
           <el-form :model="loginForm" label-position="top" @submit.prevent="submitLogin">
             <el-form-item label="用户名">
-              <el-input v-model="loginForm.username" placeholder="admin" size="large" clearable />
+              <el-input v-model="loginForm.username" placeholder="请输入用户名" size="large" clearable />
             </el-form-item>
             <el-form-item label="密码">
               <el-input
                 v-model="loginForm.password"
                 type="password"
-                placeholder="admin123"
+                placeholder="请输入密码"
                 size="large"
                 show-password
                 @keyup.enter="submitLogin"
@@ -37,12 +37,12 @@
           </el-form>
 
           <div class="login-demo">
-            <span class="muted">演示账号：</span>
-            <el-button link type="primary" @click="fill('admin')">
-              admin / admin123（管理员）
+            <span class="muted">演示账号（密码见交付说明）：</span>
+            <el-button link type="primary" @click="fillUsername('admin')">
+              admin（管理员）
             </el-button>
-            <el-button link type="primary" @click="fill('student')">
-              student / student123（学生）
+            <el-button link type="primary" @click="fillUsername('student')">
+              student（学生）
             </el-button>
           </div>
         </el-tab-pane>
@@ -118,7 +118,7 @@ const mode = ref<'login' | 'register'>('login')
 const loading = ref(false)
 const error = ref('')
 
-const loginForm = reactive({ username: 'admin', password: 'admin123' })
+const loginForm = reactive({ username: '', password: '' })
 const registerForm = reactive({ username: '', nickname: '', password: '', confirm: '' })
 
 function redirectAfterLogin() {
@@ -173,8 +173,8 @@ async function submitRegister() {
   }
 }
 
-function fill(username: string) {
+function fillUsername(username: string) {
   loginForm.username = username
-  loginForm.password = username === 'admin' ? 'admin123' : 'student123'
+  loginForm.password = ''
 }
 </script>
