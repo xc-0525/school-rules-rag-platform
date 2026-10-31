@@ -44,8 +44,14 @@ def build_services(settings: Settings) -> Services:
 
     if settings.vector_mode == "qdrant":
         embedder = BGEEmbedder(settings.embedding_model_path or "<未配置 EMBEDDING_MODEL_PATH>")
+        # 服务端模式（QDRANT_URL）优先；否则回退本地嵌入式模式（QDRANT_PATH）
+        qdrant_path = (
+            ""
+            if settings.qdrant_url
+            else (_resolve_path(settings.qdrant_path) or str(BASE_DIR / "data" / "qdrant"))
+        )
         vector: Any = QdrantVectorStore(
-            path=_resolve_path(settings.qdrant_path) or str(BASE_DIR / "data" / "qdrant"),
+            path=qdrant_path,
             url=settings.qdrant_url,
             collection=settings.qdrant_collection,
             embedder=embedder,

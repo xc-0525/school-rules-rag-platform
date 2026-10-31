@@ -9,13 +9,15 @@
 > **Day4 已完成**：Vue3 + Vite 前端（登录 / 问答 SSE / Agent 轨迹 / 来源引用 / 反馈 / 会话历史 / 文档管理）；
 > 登录鉴权：admin、student 两级角色 + 学生自助注册 + Bearer token + 会话按用户隔离，管理员才能上传/删除文档。
 > 本轮回归修复（降级缓存、缓存失效、Neo4j 预检与回滚、引用校验、启动脚本解释器、driver 复用）。
-> 当前 **38 项自动化测试全过**；前端设计见 [`frontend-design.md`](frontend-design.md)。
+> 当前 **39 项自动化测试全过**；前端设计见 [`frontend-design.md`](frontend-design.md)。
 > 目标：1 周内交付可现场演示的课程答辩系统，之后平滑扩展为正常平台。
 > 注意：MySQL 暂不升级（5.5.11 → 8.0），脚本已兼容两者；升级安排在答辩后。
 
-## 0. 本机环境复用（不需要 Docker、不需要下载模型）
+## 0. 本机开发环境复用（公网部署见 Docker Compose）
 
-调试时发现本机已具备完整的真实链路环境，直接复用（全部原生/嵌入式，与 Docker 无关）：
+本机开发/答辩演示复用本地已有环境（不需要 Docker、不需要下载模型）；
+公网部署使用 Docker Compose（backend + frontend + MySQL 8 + Neo4j + Qdrant 服务模式），
+见 [`deploy-public.md`](deploy-public.md)。
 
 | 组件 | 位置 / 版本 | 用法 | 实测 |
 | --- | --- | --- | --- |

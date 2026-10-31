@@ -160,6 +160,9 @@ venv.bak/
 # v2 本地数据（Qdrant 嵌入式数据、上传文档、BGE 缓存等）
 backend/data/
 
+# Docker 部署时挂载的 BGE 模型目录（体积大，不进仓库）
+models/
+
 # Spyder project settings
 .spyderproject
 .spyproject

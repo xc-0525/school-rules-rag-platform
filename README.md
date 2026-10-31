@@ -34,6 +34,7 @@
 | 校规样例文档 | ✅ 已提供（虚构样例，替换真实文档后重跑入库即可） | [`rules/学生手册节选.md`](rules/学生手册节选.md) |
 | Vue3 前端（问答 / 轨迹 / 历史 / 文档） | ✅ 已完成：SSE 流式问答 + Agent 轨迹 + 来源引用 + 会话历史 + 文档管理 | [`frontend/`](frontend/) |
 | 登录鉴权（admin / student） | ✅ 登录页 + 学生自助注册 + Bearer token + 按用户隔离会话；管理员才能上传/删除文档 | [`backend/app/services/auth.py`](backend/app/services/auth.py) |
+| Docker 公网部署 | 🟡 Dockerfile ×2 + Compose + 部署文档已就绪；配置已通过 `docker compose config` 校验，待启动 Docker daemon 做镜像构建实测 | [`docker-compose.yml`](docker-compose.yml) · [`docs/deploy-public.md`](docs/deploy-public.md) |
 | 数据库建表脚本 | ✅ 已补齐，兼容 MySQL 5.5 / 8.0 | [`sql/init_mysql.sql`](sql/init_mysql.sql) |
 
 **答辩演示启动顺序**：
@@ -63,7 +64,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
 > 实际演示用 `start_backend.ps1` 时会自动设置 `AUTH_REQUIRED=1`（所有业务接口需带 Bearer token）。
-> 当前测试：**38 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离）；
+> 当前测试：**39 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离）；
 > 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
 > 本轮已修复：降级答案不再进缓存、文档上传/删除后清空缓存、上传前预检 Neo4j 并在失败时回滚半成品、
 > 图谱标题引用校验误判、启动脚本固定全局 Python。
@@ -353,9 +354,9 @@ mysql -u root -p --default-character-set=utf8mb4 < sql/init_mysql.sql
 MYSQL_URL=mysql+pymysql://root:你的密码@127.0.0.1:3306/school_rules_rag?charset=utf8mb4
 ```
 
-### 6.4 启动 Qdrant / Neo4j（本机原生 · 不需要 Docker）
+### 6.4 本机开发模式（Windows · 可选 Docker）
 
-本项目不使用 Docker：
+**方式 A：本机原生（答辩演示最快）**
 
 - **Qdrant**：用 `qdrant-client` 的本地嵌入式模式，数据落在 `backend/data/qdrant`，无需启动服务；
 - **BGE-small-zh**：直接读取本机缓存模型（`.env` 的 `EMBEDDING_MODEL_PATH`），无需下载；
@@ -369,6 +370,21 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_neo4j.ps1
 ```
 
 启动后 bolt：`127.0.0.1:7687`（本机配置已关闭认证），浏览器控制台：<http://127.0.0.1:7474>。
+
+**方式 B：Docker Compose（公网部署）**
+
+前端 nginx + 后端 + MySQL 8 + Neo4j + Qdrant 服务模式，一条命令启动，数据库端口不对外暴露：
+
+```bash
+cp .env.docker.example .env      # 填 DEEPSEEK_API_KEY / MYSQL_ROOT_PASSWORD
+docker compose run --rm model-download   # 下载 BGE 模型（或把本机模型拷到 ./models）
+docker compose up -d --build
+docker compose run --rm ingest   # 首次入库校规语料
+# 浏览器：http://localhost:8080（服务器上 HTTP_PORT=80）
+```
+
+完整步骤（服务器要求、HTTPS、备份、排错）见 [`docs/deploy-public.md`](docs/deploy-public.md)。
+> Docker 使用 Qdrant **服务端模式**，与本机嵌入式数据不互通，切换后需要重新入库。
 
 ### 6.5 v2 后端配置（完整 `.env` 参考）
 
@@ -518,7 +534,7 @@ school-rules-rag-platform/
 │   │   ├── services/        #   LLM / Qdrant+BGE / Neo4j / MySQL / 语义缓存适配器
 │   │   ├── db/              #   SQLAlchemy 模型与引擎
 │   │   └── schemas/         #   Pydantic 模型
-│   ├── tests/               # ✅ 38 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 鉴权/注册 + 缓存/引用/OCR 回归）
+│   ├── tests/               # ✅ 39 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 鉴权/注册 + 缓存/引用/OCR 回归）
 │   ├── scripts/
 │   │   └── ingest_rules.py  # ✅ 校规文档入库（MySQL + Qdrant + Neo4j）
 │   └── data/                #   本地 Qdrant 数据（已 gitignore）
@@ -566,7 +582,7 @@ school-rules-rag-platform/
   - **登录鉴权 + 学生自助注册**：admin/student 演示账号、学生注册后自动登录、Bearer token、按用户隔离会话、管理员才能上传/删除文档；
   - **本轮回归修复**：降级答案不进缓存、上传/删除后清空缓存、上传前 Neo4j 预检 + 失败回滚、
     图谱证据标题引用校验、启动脚本固定全局 Python、Neo4j driver 复用、multipart 路由 OpenAPI 修复；
-  - 38 项自动化测试全过
+  - 39 项自动化测试全过
 
 ### 🚧 进行中
 

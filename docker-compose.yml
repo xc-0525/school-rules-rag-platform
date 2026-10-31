@@ -1,0 +1,142 @@
+name: school-rules-rag
+
+# 后端/入库容器共用的环境变量；公网部署只需要改根目录 .env
+x-backend-env: &backend-env
+  LLM_MODE: "deepseek"
+  VECTOR_MODE: "qdrant"
+  GRAPH_MODE: "neo4j"
+  AUTH_REQUIRED: "${AUTH_REQUIRED:-1}"
+  ALLOW_REGISTRATION: "${ALLOW_REGISTRATION:-1}"
+  SERVE_FRONTEND: "0"
+  DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:?请复制 .env.docker.example 为 .env 并填写}"
+  DEEPSEEK_BASE_URL: "https://api.deepseek.com"
+  DEEPSEEK_MODEL: "deepseek-chat"
+  MYSQL_URL: "mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:?请复制 .env.docker.example 为 .env 并填写}@mysql:3306/school_rules_rag?charset=utf8mb4"
+  QDRANT_URL: "http://qdrant:6333"
+  QDRANT_COLLECTION: "rules_chunks"
+  EMBEDDING_MODEL_PATH: "/models/bge-small-zh-v1.5"
+  NEO4J_URI: "bolt://neo4j:7687"
+  NEO4J_USER: ""
+  NEO4J_PASSWORD: ""
+  TZ: "Asia/Shanghai"
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?请填写 MYSQL_ROOT_PASSWORD}"
+      MYSQL_DATABASE: school_rules_rag
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql/init_mysql.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks: [appnet]
+
+  neo4j:
+    image: neo4j:5.26
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: none
+      NEO4J_server_memory_heap_initial__size: 512M
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 512M
+      TZ: Asia/Shanghai
+    volumes:
+      - neo4j_data:/data
+    networks: [appnet]
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.0
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks: [appnet]
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment: *backend-env
+    volumes:
+      - ./models/bge-small-zh-v1.5:/models/bge-small-zh-v1.5:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      neo4j:
+        condition: service_started
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 300s
+    networks: [appnet]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    networks: [appnet]
+
+  # 首次部署：下载 BGE 模型到 ./models（profile=init，不参与默认 up）
+  model-download:
+    profiles: ["init"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    entrypoint: ["python", "-c"]
+    command:
+      - "from huggingface_hub import snapshot_download; snapshot_download('BAAI/bge-small-zh-v1.5', local_dir='/models/bge-small-zh-v1.5')"
+    environment:
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+      TZ: Asia/Shanghai
+    volumes:
+      - ./models:/models
+    networks: [appnet]
+
+  # 首次部署/更新校规语料：docker compose run --rm ingest
+  ingest:
+    profiles: ["init"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment: *backend-env
+    command: ["python", "scripts/ingest_rules.py", "--dir", "../rules", "--reset"]
+    volumes:
+      - ./models/bge-small-zh-v1.5:/models/bge-small-zh-v1.5:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      neo4j:
+        condition: service_started
+      qdrant:
+        condition: service_started
+    networks: [appnet]
+
+volumes:
+  mysql_data:
+  neo4j_data:
+  qdrant_data:
+
+networks:
+  appnet:
+    driver: bridge

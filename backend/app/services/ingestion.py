@@ -87,6 +87,7 @@ class RulesIngestor:
             settings.embedding_model_path
         )
         self.qdrant_path = _resolve_path(settings.qdrant_path, "data/qdrant")
+        self.qdrant_url = settings.qdrant_url
         self.collection = settings.qdrant_collection
         self.mysql_url = settings.mysql_url
         self.neo4j_uri = settings.neo4j_uri or "bolt://127.0.0.1:7687"
@@ -168,7 +169,11 @@ class RulesIngestor:
         elif self._client is None:
             from qdrant_client import QdrantClient
 
-            self._client = QdrantClient(path=self.qdrant_path)
+            # Docker/服务器模式用 QDRANT_URL；本机开发继续用本地嵌入式
+            if self.qdrant_url:
+                self._client = QdrantClient(url=self.qdrant_url)
+            else:
+                self._client = QdrantClient(path=self.qdrant_path)
 
         existing = {item.name for item in self._client.get_collections().collections}
         if reset and self.collection in existing:

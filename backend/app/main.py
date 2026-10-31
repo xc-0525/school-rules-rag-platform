@@ -120,6 +120,16 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             },
         }
 
+    @app.get("/ready", include_in_schema=False)
+    async def ready() -> dict[str, Any]:
+        """容器编排用就绪探针：向量依赖未就绪时返回 503。"""
+        issues: list[str] = []
+        if settings.vector_mode == "qdrant" and not getattr(app.state, "vector_ready", False):
+            issues.append("vector_not_ready")
+        if issues:
+            raise HTTPException(status_code=503, detail={"ready": False, "issues": issues})
+        return {"ready": True}
+
     @app.get("/", include_in_schema=False)
     async def root():
         if serve_frontend:

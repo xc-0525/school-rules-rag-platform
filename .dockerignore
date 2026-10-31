@@ -1,0 +1,12 @@
+.git
+.venv
+**/__pycache__
+*.pyc
+backend/.env
+backend/data
+frontend/
+docs/
+models/
+.env
+.env.*
+!.env.docker.example
