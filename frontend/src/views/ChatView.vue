@@ -97,6 +97,7 @@ async function send() {
   try {
     await streamChat(query, store.conversationId, {
       onTrace: (event) => store.addTrace(assistantIndex, event),
+      onTool: (event) => store.addTrace(assistantIndex, event as any),
       onMeta: (payload) => {
         if (payload.sources) store.setSources(assistantIndex, payload.sources, !!payload.cached)
       },

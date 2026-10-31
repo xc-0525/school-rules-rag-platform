@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from app.schemas.chat import Evidence, SourceItem
@@ -17,6 +19,16 @@ class AgentState(BaseModel):
     query: str
     conversation_id: int | None = None
     user_id: int = 1
+    run_id: str = ""
+
+    # ---- 多轮记忆（最近消息注入 Prompt）----
+    history: list[dict[str, str]] = Field(default_factory=list)
+
+    # ---- Tool Calling（LLM 选择工具 + 执行结果）----
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    tool_evidence: list[Evidence] = Field(default_factory=list)
+    tool_search_used: bool = False
+    tool_only: bool = False
 
     # ---- 查询理解 ----
     intent: str = ""

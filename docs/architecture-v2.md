@@ -3,13 +3,13 @@
 > 题目定稿：《基于 FastAPI 和 Vue 的校园服务智能问答系统的设计与实现》
 > （原题目《基于 RAG 与多智能体协作的校纪校规问答平台》；名称变更与选题口径见 [`选题与名称记录.md`](选题与名称记录.md)。）
 
-> 状态：**Day1 已完成**（图引擎 + 10+ 节点 + SSE 轨迹 + Mock 适配器）
+> 状态：**Day1 已完成**（图引擎 + 15 节点 + SSE 轨迹 + Mock 适配器）
 > **Day2 已完成**：真实 Qdrant（本地嵌入式）+ 本地 BGE、MySQL 9 表建库、问答落库、会话历史、点赞点踩；真实 DeepSeek 端到端跑通。
 > **Day3（提前）已完成**：校规文档解析入库流水线 + Neo4j 校规图谱，真实三库并行召回已联调。
 > **Day4 已完成**：Vue3 + Vite 前端（登录 / 问答 SSE / Agent 轨迹 / 来源引用 / 反馈 / 会话历史 / 文档管理）；
 > 登录鉴权：admin、student 两级角色 + 学生自助注册 + Bearer token + 会话按用户隔离，管理员才能上传/删除文档。
 > 本轮回归修复（降级缓存、缓存失效、Neo4j 预检与回滚、引用校验、启动脚本解释器、driver 复用）。
-> 当前 **39 项自动化测试全过**；前端设计见 [`frontend-design.md`](frontend-design.md)。
+> 当前 **46 项自动化测试全过**；前端设计见 [`frontend-design.md`](frontend-design.md)。
 > 目标：1 周内交付可现场演示的课程答辩系统，之后平滑扩展为正常平台。
 > 注意：MySQL 暂不升级（5.5.11 → 8.0），脚本已兼容两者；升级安排在答辩后。
 
@@ -24,7 +24,7 @@
 | Qdrant | `qdrant-client` 本地嵌入式模式 | `QdrantClient(path=backend/data/qdrant)`，数据落盘 | ✅ 建集合、写入、语义检索通过 |
 | BGE-small-zh | `G:\ai-models\hf\hub\models--BAAI--bge-small-zh-v1.5\snapshots\7999e1d...` | `EMBEDDING_MODEL_PATH` 指向该目录，零下载 | ✅ 512 维，冷启动加载约 2~3 分钟，之后单次检索约 0.05s |
 | Neo4j | `G:\neo4j` · 5.26.30 · `auth_enabled=false` | `scripts/start_neo4j.ps1` 使用本机 Java17 启动 | ✅ 已灌入样例手册：1 文档 / 8 章节 / 26 条款 / 7 主题 / 74 关系 |
-| MySQL | 本机服务 5.5.11，root 无密码 | `MYSQL_URL` + `school_rules_rag` 库（`sql/init_mysql.sql`） | ✅ 9 张表 + 种子数据（admin/student、6 标签） |
+| MySQL | 本机服务 5.5.11，root 无密码 | `MYSQL_URL` + `school_rules_rag` 库（`sql/init_mysql.sql`） | ✅ 11 张表 + 种子数据（admin/student、6 标签、2 公告） |
 
 > 注意：`backend/data/` 已加入 `.gitignore`；没有改动你原来 `G:\智能体学习\qdrant_data` 里的课程数据。
 
@@ -32,7 +32,7 @@
 
 | 课程要求 | 实现 |
 | --- | --- |
-| 智能体设计、完整图构建、≥5 节点 | 13 个节点（11 个 Agent 节点 + 1 个并行分组 + 1 个终态节点），见 `app/agents/graph.py` |
+| 智能体设计、完整图构建、≥5 节点 | 15 个节点（13 个 Agent 节点 + 1 个并行分组 + 1 个终态节点），见 `app/agents/graph.py` |
 | 至少 2 种控制结构 | 三种全有：并行（双路召回）、选择（缓存 / 充分性 / 引用校验）、循环（查询扩展重召回、引用校验重生成） |
 | 完整前后端 | 后端 `backend/app`（FastAPI + SSE）；前端 `frontend/`（Vue3 + Vite + Element Plus，已实现） |
 | 实际系统演示 | `/api/v1/chat` SSE 实时输出答案 + Agent 轨迹 |
@@ -45,8 +45,10 @@ Vue3 SPA ── /api/v1/* + SSE ──> FastAPI (app/main.py)
                                      │
                           WorkflowEngine（并行 / 选择 / 循环 + trace）
                                      │
-         11 个 Agent 节点（查询理解 / 检索 / 图谱 / 融合 / 充分性 / 扩展 /
-                            生成 / 引用校验 / 拒答 / 降级 / 落库）
+         13 个 Agent 节点（查询理解 / 记忆 / 工具选择 / 检索 / 图谱 / 融合 /
+            充分性 / 扩展 / 生成 / 引用校验 / 拒答 / 降级 / 缓存）
+                                     │
+        Services 适配器（Mock ⇄ Qdrant / Neo4j / MySQL / DeepSeek）+ 3 个真实 Tool
                                      │
         Services 适配器（Mock ⇄ Qdrant / Neo4j / MySQL / DeepSeek）
 ```
@@ -60,9 +62,13 @@ flowchart TD
     A([用户提问]) --> B{问题归一化缓存命中?}
     B -->|命中| P[落库 / 缓存]
     B -->|未命中| C[① 查询理解 Agent]
-    C --> D1[② 检索 Agent]
-    C --> D2[③ 图谱 Agent]
-    D1 --> E[④ 证据融合 Agent]
+    C --> M[② 记忆 Agent（历史 + 追问改写）]
+    M --> T{③ 工具选择 Agent（LLM 选 Tool）}
+    T -->|query_announcements / create_ticket| P
+    T -->|search_rules| E[④ 证据融合 Agent]
+    T -->|不调用工具| D1[检索 Agent]
+    T -->|不调用工具| D2[图谱 Agent]
+    D1 --> E
     D2 --> E
     E --> F{⑤ 充分性判定}
     F -->|不足 且 轮次<2| G[⑥ 查询扩展 Agent]
@@ -78,7 +84,27 @@ flowchart TD
     K --> P
 ```
 
-## 4. 控制结构落点（答辩讲解用）
+## 4. Tool Calling 与多轮记忆
+
+### 4.1 三个真实 Tool（`app/agents/tools.py`）
+
+| Tool | 能力 | 真实落点 |
+| --- | --- | --- |
+| `search_rules` | 校规/校园服务检索 | 复用 Qdrant 向量检索 + Neo4j 图谱，返回证据与来源 |
+| `query_announcements` | 查询已发布公告 | 真实查询 MySQL `announcements` 表 |
+| `create_ticket` | 创建转人工/投诉工单 | 真实写 MySQL `tickets` 表并返回工单号 |
+
+- 由 DeepSeek 原生 function calling（`tools` + `tool_choice=auto`）自主选择，最多 2 轮；
+- 每次调用写 `tool_call_logs`（审计/可观测），并通过 SSE `tool` 事件推给前端轨迹面板；
+- LLM/工具异常自动回退确定性 RAG，保证演示不翻车。
+
+### 4.2 多轮记忆
+
+- `memory_agent` 读取当前会话最近 6 条消息（`persistence.recent_messages`），注入生成 Prompt；
+- 指代型追问（"那第二条呢""还有呢"）先用 LLM 改写为独立 query 再检索；
+- 历史不会重复落库，只作为生成上下文。
+
+## 5. 控制结构落点（答辩讲解用）
 
 | 控制结构 | 图位置 | 演示看点 |
 | --- | --- | --- |
@@ -94,6 +120,7 @@ flowchart TD
 | --- | --- |
 | `meta` | 证据来源（融合后推送；缓存命中时带 `cached: true`） |
 | `trace` | 节点轨迹：`{node, phase: start/end/route, kind, control, latency_ms, from, to, reason}` |
+| `tool` | 工具调用：`{phase: tool_start/tool_end, tool, arguments, success, summary, latency_ms}` |
 | `delta` | 大模型逐字增量 |
 | `done` | 完整答案、来源、`refused/degraded/cached`、`runtime`（步数 / 访问节点 / 循环次数） |
 | `error` | 终止错误 |
@@ -169,7 +196,7 @@ backend/
 
 | 天 | 内容 | 状态 |
 | --- | --- | --- |
-| D1 | 图引擎 + 10+ 节点 + SSE trace + Mock 适配器 + 测试 | ✅ 完成 |
+| D1 | 图引擎 + 15 节点 + SSE trace + Mock 适配器 + 测试 | ✅ 完成 |
 | D2 | Qdrant 本地模式 + 本地 BGE 小语料入库；MySQL 9 表 + 落库 + 会话历史 + 反馈 | ✅ 完成 |
 | D3 | Vue3：登录/注册页 + 问答（SSE/轨迹/来源/反馈）+ 会话历史 + 文档管理 + token 鉴权 | ✅ 完成 |
 | D4 | 文档上传/列表/详情/删除 API；上传前依赖预检 + 失败回滚 + 缓存失效（本轮修复） | ✅ 完成 |

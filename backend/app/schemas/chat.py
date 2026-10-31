@@ -18,7 +18,9 @@ class ChatRequest(BaseModel):
 class Evidence(BaseModel):
     """一条召回证据（向量分块或图谱路径），贯穿 Agent 图。"""
 
-    type: Literal["vector", "graph"] = Field(description="vector=向量召回，graph=图谱关系")
+    type: Literal["vector", "graph", "tool"] = Field(
+        description="vector=向量召回，graph=图谱关系，tool=业务工具结果"
+    )
     title: str = Field(description="来源名称，如《学生宿舍管理规定》")
     detail: str = Field(description="章节 / 路径 ID")
     snippet: str = Field(description="证据原文")
@@ -28,7 +30,7 @@ class Evidence(BaseModel):
 class SourceItem(BaseModel):
     """返回给前端的来源引用（不含内部字段）。"""
 
-    type: Literal["vector", "graph"]
+    type: Literal["vector", "graph", "tool"]
     title: str
     detail: str
     snippet: str

@@ -1,12 +1,14 @@
 """Agent 图的定义：节点清单 + 边 + 条件路由（课程答辩的核心交付物）。
 
-图的形状（10+ 节点，三种控制结构）：
+图的形状（15 节点，三种控制结构）：
 
-    缓存查询(选择) → 查询理解 → ┬ 检索 Agent ┐
-                                └ 图谱 Agent ┘(并行) → 证据融合
-    → 充分性判定(选择) ──充分──→ 生成 Agent → 引用校验(选择)
-         │ 不足且未超轮次                        │ 不通过且未超次数
-         └→ 查询扩展(循环) ──回到并行召回         └→ 回到生成(循环)
+    缓存查询(选择) → 查询理解 → 记忆 Agent(选择)
+      → 工具选择 Agent(选择：LLM 选 Tool) ──工具直接回答──→ 落库
+      │ 选了 search_rules                          │ 未选工具
+      ↓                                             ↓
+    证据融合 → 充分性判定(选择) ──充分──→ 生成 Agent → 引用校验(选择)
+      │ 不足且未超轮次                              │ 不通过且未超次数
+      └→ 查询扩展(循环) ──回到双路召回                 └→ 回到生成(循环)
     → 落库 / 拒答 / 降级
 """
 
@@ -25,6 +27,13 @@ def build_graph(settings: Settings) -> tuple[dict[str, NodeSpec], str]:
         if state.cached:
             return "persist_answer", "命中语义缓存，跳过完整链路"
         return "query_understand", "缓存未命中，进入完整 Agent 链路"
+
+    def route_tools(state) -> tuple[str | None, str]:
+        if state.tool_only and state.answer:
+            return "persist_answer", "工具已直接生成回答，落库并返回"
+        if state.tool_search_used:
+            return "fuse_evidence", "LLM 已选择检索工具并执行，进入证据融合"
+        return "parallel_retrieval", "未选择业务工具，走标准双路召回"
 
     def route_sufficiency(state) -> tuple[str | None, str]:
         score = state.evidence_score
@@ -68,7 +77,23 @@ def build_graph(settings: Settings) -> tuple[dict[str, NodeSpec], str]:
             label="查询理解 Agent",
             description="识别意图与实体，产出改写后的查询",
             run=nodes.query_understand,
-            next="parallel_retrieval",
+            next="memory_agent",
+        ),
+        "memory_agent": NodeSpec(
+            name="memory_agent",
+            label="记忆 Agent",
+            description="读取最近多轮消息；指代型追问先改写为独立 query（多轮记忆）",
+            control="selection",
+            run=nodes.memory_agent,
+            next="tool_agent",
+        ),
+        "tool_agent": NodeSpec(
+            name="tool_agent",
+            label="工具选择 Agent",
+            description="DeepSeek function calling 自主选择 search_rules / query_announcements / create_ticket",
+            control="selection",
+            run=nodes.tool_agent,
+            route=route_tools,
         ),
         "parallel_retrieval": NodeSpec(
             name="parallel_retrieval",

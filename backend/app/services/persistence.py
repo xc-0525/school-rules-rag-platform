@@ -31,6 +31,10 @@ class Persistence(Protocol):
 
     async def get_conversation(self, conversation_id: int, user_id: int) -> dict[str, Any] | None: ...
 
+    async def recent_messages(
+        self, conversation_id: int, user_id: int, limit: int = 6
+    ) -> list[dict[str, str]]: ...
+
     async def add_feedback(
         self, message_id: int, user_id: int, rating: int, comment: str | None
     ) -> dict[str, Any] | None: ...
@@ -148,6 +152,24 @@ class MockPersistence:
             else:
                 self._feedback[key].update({"rating": rating, "comment": comment})
             return dict(self._feedback[key])
+
+    async def recent_messages(
+        self, conversation_id: int, user_id: int, limit: int = 6
+    ) -> list[dict[str, str]]:
+        with self._lock:
+            conversation = self._conversations.get(conversation_id)
+            if conversation is None or conversation["user_id"] != user_id:
+                return []
+            messages = [
+                message
+                for message in self._messages.values()
+                if message["conversation_id"] == conversation_id
+            ]
+            messages.sort(key=lambda message: message["id"])
+            return [
+                {"role": str(message["role"]), "content": str(message["content"])}
+                for message in messages[-max(1, limit):]
+            ]
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +326,40 @@ class MySQLPersistence:
         self, message_id: int, user_id: int, rating: int, comment: str | None
     ) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._add_feedback_sync, message_id, user_id, rating, comment)
+
+    async def recent_messages(
+        self, conversation_id: int, user_id: int, limit: int = 6
+    ) -> list[dict[str, str]]:
+        return await asyncio.to_thread(
+            self._recent_messages_sync, conversation_id, user_id, limit
+        )
+
+    def _recent_messages_sync(
+        self, conversation_id: int, user_id: int, limit: int
+    ) -> list[dict[str, str]]:
+        from sqlalchemy import select
+
+        from app.db.models import Conversation, Message
+        from app.db.session import new_session
+
+        with new_session(self.url) as session:
+            conversation = session.get(Conversation, conversation_id)
+            if conversation is None or conversation.user_id != user_id:
+                return []
+            rows = (
+                session.execute(
+                    select(Message)
+                    .where(Message.conversation_id == conversation_id)
+                    .order_by(Message.id.desc())
+                    .limit(max(1, limit))
+                )
+                .scalars()
+                .all()
+            )
+        return [
+            {"role": str(message.role), "content": message.content}
+            for message in reversed(rows)
+        ]
 
     def _add_feedback_sync(
         self, message_id: int, user_id: int, rating: int, comment: str | None

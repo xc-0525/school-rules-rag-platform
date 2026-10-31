@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -95,6 +96,7 @@ def build_router(
             query=request.query,
             conversation_id=request.conversation_id,
             user_id=user.id if user else 1,
+            run_id=uuid.uuid4().hex[:12],
         )
 
         # ---------------- 非流式：一次性 JSON（Swagger 调试方便） ----------------

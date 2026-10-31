@@ -3,6 +3,7 @@ import { clearSession, getToken } from '../utils/session'
 
 export interface StreamHandlers {
   onTrace?: (event: TraceEvent) => void
+  onTool?: (event: Record<string, any>) => void
   onMeta?: (payload: { sources?: SourceItem[]; cached?: boolean; refused?: boolean }) => void
   onDelta?: (text: string) => void
   onDone?: (payload: ChatDonePayload) => void
@@ -68,6 +69,7 @@ export async function streamChat(
     if (!parsed) return
     const { event, data } = parsed
     if (event === 'trace') handlers.onTrace?.(data)
+    else if (event === 'tool') handlers.onTool?.(data)
     else if (event === 'meta') handlers.onMeta?.(data)
     else if (event === 'delta') handlers.onDelta?.(data.content ?? '')
     else if (event === 'done') handlers.onDone?.(data)

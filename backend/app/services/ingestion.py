@@ -269,7 +269,9 @@ class RulesIngestor:
 
     # ------------------------------------------------------------ 单文档写入
     def _ingest_document(self, document: ParsedDocument) -> dict[str, Any]:
-        from app.db.models import Chunk, Document
+        from sqlalchemy import select
+
+        from app.db.models import Chunk, Document, DocumentTag, DocumentTagRelation
 
         point_ids = [str(uuid.uuid4()) for _ in document.chunks]
 
@@ -301,6 +303,27 @@ class RulesIngestor:
                         content=chunk.content,
                     )
                 )
+
+            # 文档标签：按条款内容自动打标（document_tags / document_tag_relations 真实使用）
+            topics = sorted(
+                {
+                    topic
+                    for chunk in document.chunks
+                    for topic in classify_topics(chunk.chapter, chunk.content)
+                }
+            )
+            for topic_name in topics:
+                tag = session.execute(
+                    select(DocumentTag).where(DocumentTag.name == topic_name)
+                ).scalar_one_or_none()
+                if tag is None:
+                    tag = DocumentTag(name=topic_name)
+                    session.add(tag)
+                    session.flush()
+                session.add(
+                    DocumentTagRelation(document_id=document_id, tag_id=tag.id)
+                )
+
             session.commit()
 
         # 2) Qdrant +（可选）Neo4j；任一失败都回滚已写入的数据，避免半成品

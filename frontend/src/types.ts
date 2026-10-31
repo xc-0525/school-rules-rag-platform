@@ -1,5 +1,5 @@
 export interface SourceItem {
-  type: 'vector' | 'graph'
+  type: 'vector' | 'graph' | 'tool'
   title: string
   detail: string
   snippet: string
@@ -21,7 +21,7 @@ export interface LoginResponse {
 export interface TraceEvent {
   ts_ms?: number
   node?: string
-  phase?: 'start' | 'end' | 'route' | string
+  phase?: 'start' | 'end' | 'route' | 'tool_start' | 'tool_end' | string
   kind?: 'agent' | 'parallel' | 'terminal' | string
   control?: '' | 'parallel' | 'selection' | 'loop' | string
   label?: string
@@ -29,6 +29,10 @@ export interface TraceEvent {
   from?: string
   to?: string | null
   reason?: string
+  tool?: string
+  arguments?: Record<string, any>
+  success?: boolean
+  summary?: string
 }
 
 export interface RuntimeInfo {
@@ -37,6 +41,7 @@ export interface RuntimeInfo {
   agent_node_runs: number
   retrieval_round: number
   regen_count: number
+  tool_calls?: number
   latency_ms: number
 }
 

@@ -5,10 +5,10 @@
       <div class="source-head">
         <el-tag
           size="small"
-          :type="source.type === 'graph' ? 'warning' : 'primary'"
+          :type="source.type === 'graph' ? 'warning' : source.type === 'tool' ? 'success' : 'primary'"
           effect="plain"
         >
-          {{ source.type === 'graph' ? '图谱' : '向量' }}
+          {{ source.type === 'graph' ? '图谱' : source.type === 'tool' ? '工具' : '向量' }}
         </el-tag>
         <span class="source-name">{{ source.title }}</span>
       </div>

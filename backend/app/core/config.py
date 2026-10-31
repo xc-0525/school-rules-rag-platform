@@ -61,6 +61,8 @@ class Settings:
     max_steps: int = 24
     max_retrieval_rounds: int = 2
     max_regen: int = 1
+    max_tool_rounds: int = 2
+    memory_window: int = 6
     evidence_threshold: float = 0.5
     node_timeout: float = 120.0
 
@@ -94,6 +96,8 @@ class Settings:
             max_steps=_env_int("MAX_STEPS", 24),
             max_retrieval_rounds=_env_int("MAX_RETRIEVAL_ROUNDS", 2),
             max_regen=_env_int("MAX_REGEN", 1),
+            max_tool_rounds=_env_int("MAX_TOOL_ROUNDS", 2),
+            memory_window=_env_int("MEMORY_WINDOW", 6),
             evidence_threshold=_env_float("EVIDENCE_THRESHOLD", 0.5),
             mysql_url=os.getenv("MYSQL_URL", "").strip(),
             qdrant_path=os.getenv("QDRANT_PATH", "").strip(),

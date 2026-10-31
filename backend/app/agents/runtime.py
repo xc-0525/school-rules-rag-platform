@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -18,6 +19,8 @@ from typing import Any, Literal
 from app.agents.events import EventBus, NullBus
 from app.agents.state import AgentState
 from app.core.config import Settings
+
+logger = logging.getLogger("app.workflow")
 
 NodeRunFn = Callable[[AgentState, "NodeContext"], Awaitable[dict[str, Any]]]
 """节点函数：读 state，返回要更新的字段（dict）。"""
@@ -49,13 +52,22 @@ class NodeSpec:
 class NodeContext:
     """节点运行时上下文：依赖注入 + 事件推送。"""
 
-    def __init__(self, services: Any, settings: Settings, bus: EventBus | NullBus) -> None:
+    def __init__(
+        self,
+        services: Any,
+        settings: Settings,
+        bus: EventBus | NullBus,
+        recorder: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> None:
         self.services = services
         self.settings = settings
         self.bus = bus
+        self._recorder = recorder
 
     async def emit(self, event: str, payload: dict[str, Any]) -> None:
         await self.bus.emit(event, payload)
+        if self._recorder is not None:
+            self._recorder(event, payload)
 
     async def delta(self, content: str) -> None:
         """推送大模型生成的增量文本。"""
@@ -95,6 +107,12 @@ class WorkflowEngine:
         payload = {"ts_ms": self._ms(), **payload}
         self.events.append({"event": event, **payload})
         await self.bus.emit(event, payload)
+
+    def _record_context_event(self, event: str, payload: dict[str, Any]) -> None:
+        """记录节点内通过 ctx.emit 推送的事件（tool/meta 等），便于测试与审计。"""
+        if event == "delta":
+            return
+        self.events.append({"event": event, "ts_ms": self._ms(), **payload})
 
     # ------------------------------------------------------------------ 执行
     async def run(self, state: AgentState) -> AgentState:
@@ -178,6 +196,7 @@ class WorkflowEngine:
 
         t0 = time.perf_counter()
         self.visited.append(spec.name)
+        logger.info("node.start node=%s step=%d", spec.name, state.steps)
         await self._emit(
             "trace",
             {
@@ -188,19 +207,27 @@ class WorkflowEngine:
                 "label": spec.label,
             },
         )
-        ctx = NodeContext(self.services, self.settings, self.bus)
+        ctx = NodeContext(
+            self.services,
+            self.settings,
+            self.bus,
+            recorder=self._record_context_event,
+        )
         try:
             update = await asyncio.wait_for(spec.run(state, ctx), timeout=self.settings.node_timeout)
         except asyncio.TimeoutError as exc:
+            logger.exception("node.timeout node=%s", spec.name)
             raise WorkflowError(f"节点「{spec.label or spec.name}」执行超时") from exc
 
+        latency_ms = self._elapsed(t0)
+        logger.info("node.end node=%s latency_ms=%d", spec.name, latency_ms)
         await self._emit(
             "trace",
             {
                 "node": spec.name,
                 "phase": "end",
                 "kind": spec.kind,
-                "latency_ms": self._elapsed(t0),
+                "latency_ms": latency_ms,
             },
         )
         return update or {}
@@ -215,6 +242,7 @@ class WorkflowEngine:
             "agent_node_runs": len(agent_nodes),
             "retrieval_round": state.retrieval_round,
             "regen_count": state.regen_count,
+            "tool_calls": len(state.tool_calls),
             "latency_ms": self._ms(),
         }
 

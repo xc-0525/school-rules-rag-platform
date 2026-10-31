@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -26,9 +27,23 @@ from app.services.container import Services, build_services
 
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
     """应用工厂：测试时可注入自定义 Settings / Services（例如 FakeLLM）。"""
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+    logger = logging.getLogger("app.main")
     settings = settings or Settings.from_env()
     services = services or build_services(settings)
     nodes, entry = build_graph(settings)
+    logger.info(
+        "create_app modes vector=%s graph=%s llm=%s auth=%s tools=%s",
+        settings.vector_mode,
+        settings.graph_mode,
+        settings.llm_mode,
+        settings.auth_required,
+        settings.max_tool_rounds,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

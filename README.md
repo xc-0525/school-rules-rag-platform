@@ -20,14 +20,15 @@
 
 > **两套可运行版本**：
 > 1. **极简版** [`backend/main.py`](backend/main.py)：单文件 MVP，Mock 双 Agent + DeepSeek 流式，40 项冒烟检查通过；
-> 2. **v2 正式工程** [`backend/app/`](backend/app/)：自研 Agent 图引擎（13 节点 / 并行·选择·循环 / SSE 轨迹）+ 真实 MySQL 落库 + 会话历史 + 真实 Qdrant（本地嵌入式 + 本地 BGE）+ 真实 Neo4j 图谱 + 真实 DeepSeek，**全链路已端到端跑通**。
+> 2. **v2 正式工程** [`backend/app/`](backend/app/)：自研 Agent 图引擎（15 节点 / 并行·选择·循环 / SSE 轨迹 / Tool Calling + 多轮记忆）+ 真实 MySQL 落库 + 会话历史 + 真实 Qdrant（本地嵌入式 + 本地 BGE）+ 真实 Neo4j 图谱 + 真实 DeepSeek，**全链路已端到端跑通**。
 
 | 模块 | 当前状态 | 代码位置 |
 | --- | --- | --- |
 | 极简版主循环 `POST /chat` | ✅ 可直接运行 | [`backend/main.py`](backend/main.py) |
-| v2 Agent 图引擎（13 节点，并行/选择/循环） | ✅ 已完成，SSE 实时输出轨迹 | [`backend/app/agents/`](backend/app/agents/) |
+| v2 Agent 图引擎（15 节点，并行/选择/循环） | ✅ 已完成，SSE 实时输出轨迹 | [`backend/app/agents/`](backend/app/agents/) |
+| Tool Calling + 多轮记忆 | ✅ 3 个真实工具 + LLM 自主选工具 + 追问改写 | [`backend/app/agents/tools.py`](backend/app/agents/tools.py) |
 | v2 真实向量检索（Qdrant 本地嵌入式 + BGE-small-zh） | ✅ 已实测（512 维，检索约 0.05s/次） | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
-| v2 MySQL 落库 / 会话历史 / 点赞点踩 | ✅ 9 张表 + 真实 DeepSeek 全链路通过 | [`backend/app/services/persistence.py`](backend/app/services/persistence.py) |
+| v2 MySQL 落库 / 会话历史 / 点赞点踩 | ✅ 11 张表 + 真实 DeepSeek 全链路通过 | [`backend/app/services/persistence.py`](backend/app/services/persistence.py) |
 | v2 真实 Neo4j 图谱 | ✅ 已灌入样例手册（1 文档 / 8 章节 / 26 条款 / 7 主题），双路召回已验证 | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
 | 校规文档入库流水线 | ✅ 解析 → MySQL → BGE → Qdrant → Neo4j（命令行 + 上传接口） | [`backend/scripts/ingest_rules.py`](backend/scripts/ingest_rules.py) |
 | 文档上传 / 列表 / 详情 / 删除 API | ✅ `.md/.txt` + 文字版 PDF（base64）；扫描件自动 OCR（已实测，单页约 8s） | [`backend/app/api/v1/documents.py`](backend/app/api/v1/documents.py) |
@@ -64,7 +65,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
 > 实际演示用 `start_backend.ps1` 时会自动设置 `AUTH_REQUIRED=1`（所有业务接口需带 Bearer token）。
-> 当前测试：**39 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离）；
+> 当前测试：**46 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆）；
 > 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
 > 本轮已修复：降级答案不再进缓存、文档上传/删除后清空缓存、上传前预检 Neo4j 并在失败时回滚半成品、
 > 图谱标题引用校验误判、启动脚本固定全局 Python。
@@ -208,7 +209,7 @@ erDiagram
     document_tags ||--o{ document_tag_relations : ""
 ```
 
-### 5.3 核心表一览（共 9 张）
+### 5.3 核心表一览（共 11 张）
 
 | # | 表名 | 说明 | 关键字段 |
 | --- | --- | --- | --- |
@@ -219,11 +220,13 @@ erDiagram
 | 5 | `chunks` | 文档分块表（**Qdrant 映射**） | `qdrant_point_id` 唯一、`chapter`、`chunk_index` |
 | 6 | `feedback` | 用户反馈表 | `message_id`、`rating`（1 赞 / -1 踩）、`comment` |
 | 7 | `announcements` | 公告表 | `title`、`is_pinned`、`status`（发布/草稿） |
-| 8 | `document_tags` | 文档标签表 | `name` 唯一（学籍管理、违纪处分等） |
+| 8 | `document_tags` | 文档标签表（入库时按条款主题自动打标） | `name` 唯一（学籍管理、违纪处分等） |
 | 9 | `document_tag_relations` | 文档-标签关联表（多对多） | `document_id` + `tag_id` 联合唯一 |
+| 10 | `tickets` | 转人工/投诉工单表（`create_ticket` Tool 写入） | `ticket_no` 唯一、`status`（open/processing/closed） |
+| 11 | `tool_call_logs` | Tool Calling 审计日志（Agent 可观测性） | `run_id`、`tool_name`、`arguments`、`success`、`latency_ms` |
 
 > 建表脚本：`sql/init_mysql.sql`（兼容 MySQL 5.5+ / 8.0，utf8mb4 / InnoDB，含外键级联、索引与种子数据）。
-> 已在本地 MySQL 5.5.11 上实测通过（9 张表 + 2 个账号 + 6 个标签）。
+> 已在本地 MySQL 5.5.11 上实测通过（11 张表 + 2 个账号 + 6 个标签 + 2 条公告）。
 
 ### 5.4 初始化数据
 
@@ -344,7 +347,7 @@ curl -N -X POST http://127.0.0.1:8000/chat \
 > 脚本已就绪并通过本机 MySQL 5.5.11 实测；MySQL 8.0 同样兼容。
 
 ```bash
-# 创建数据库 school_rules_rag、建 9 张表并写入种子账号/标签
+# 创建数据库 school_rules_rag、建 11 张表并写入种子账号/标签/公告
 mysql -u root -p --default-character-set=utf8mb4 < sql/init_mysql.sql
 ```
 
@@ -420,6 +423,10 @@ SERVE_FRONTEND=1
 
 # 是否开放学生自助注册：1=开放（默认），0=关闭
 ALLOW_REGISTRATION=1
+
+# Agent 的 Tool Calling / 多轮记忆参数
+MAX_TOOL_ROUNDS=2
+MEMORY_WINDOW=6
 ```
 
 ```bash
@@ -534,7 +541,7 @@ school-rules-rag-platform/
 │   │   ├── services/        #   LLM / Qdrant+BGE / Neo4j / MySQL / 语义缓存适配器
 │   │   ├── db/              #   SQLAlchemy 模型与引擎
 │   │   └── schemas/         #   Pydantic 模型
-│   ├── tests/               # ✅ 39 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 鉴权/注册 + 缓存/引用/OCR 回归）
+│   ├── tests/               # ✅ 46 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 鉴权/注册 + Tool/Memory + 缓存/引用/OCR 回归）
 │   ├── scripts/
 │   │   └── ingest_rules.py  # ✅ 校规文档入库（MySQL + Qdrant + Neo4j）
 │   └── data/                #   本地 Qdrant 数据（已 gitignore）
@@ -567,11 +574,13 @@ school-rules-rag-platform/
 ### ✅ 已完成
 
 - 系统总体架构设计：MySQL + Neo4j + Qdrant 多库混合存储方案
-- MySQL 数据库设计：9 张表、外键与索引、`qdrant_point_id` 映射与溯源链路；建表脚本已落地并通过 5.5.11 实测
+- MySQL 数据库设计：11 张表、外键与索引、`qdrant_point_id` 映射与溯源链路；建表脚本已落地并通过 5.5.11 实测
+- **Tool Calling + 多轮记忆**：LLM 自主选择 3 个真实工具（检索/公告/工单），ReAct 循环；历史消息注入 + 追问改写
+- **Docker Compose 公网部署**：frontend/backend/MySQL/Neo4j/Qdrant 五服务，见 `docs/deploy-public.md`
 - Neo4j 图谱本体（Ontology）设计
 - **极简版多智能体闭环**：检索 / 图谱 Agent 并行召回（Mock）+ 证据融合 + 防幻觉拒答 + DeepSeek 流式生成 + MySQL Mock 落库
 - **v2 正式工程（课程答辩版）**：
-  - 自研 Agent 图引擎：13 节点，支持并行 / 选择 / 循环，SSE 实时输出节点轨迹；
+  - 自研 Agent 图引擎：15 节点（含 Tool Calling / 记忆 Agent），支持并行 / 选择 / 循环，SSE 实时输出节点轨迹；
   - 真实 Qdrant（本地嵌入式）+ 本地 BGE-small-zh 检索；
   - 真实 Neo4j 校规图谱（文档 → 章节 → 条款 → 主题），与向量检索并行双路召回；
   - 校规文档入库流水线：解析切分 → MySQL 记录 → BGE 向量 → Qdrant → Neo4j；支持命令行批量入库与 HTTP 上传接口；
@@ -582,7 +591,7 @@ school-rules-rag-platform/
   - **登录鉴权 + 学生自助注册**：admin/student 演示账号、学生注册后自动登录、Bearer token、按用户隔离会话、管理员才能上传/删除文档；
   - **本轮回归修复**：降级答案不进缓存、上传/删除后清空缓存、上传前 Neo4j 预检 + 失败回滚、
     图谱证据标题引用校验、启动脚本固定全局 Python、Neo4j driver 复用、multipart 路由 OpenAPI 修复；
-  - 39 项自动化测试全过
+  - 46 项自动化测试全过
 
 ### 🚧 进行中
 

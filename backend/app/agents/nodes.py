@@ -8,13 +8,19 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import re
+import uuid
 from typing import Any
 
 from app.agents.runtime import NodeContext
 from app.agents.state import AgentState
-from app.schemas.chat import SourceItem
+from app.agents.tools import TOOL_DEFINITIONS, ToolRunner
+from app.schemas.chat import Evidence, SourceItem
 from app.services import mock_data
+
+logger = logging.getLogger("app.agents")
 
 NO_EVIDENCE_ANSWER = (
     "抱歉，未找到相关校规或校园服务信息。建议换一种说法重新提问，或联系辅导员 / 学生工作处进行人工确认。"
@@ -34,25 +40,48 @@ STRICT_SYSTEM_PROMPT = (
     + "\n5. 这是重新生成：上一版答案未通过引用校验，本轮必须逐条引用【背景资料】中的原文。"
 )
 
+TOOL_SYSTEM_PROMPT = (
+    "你是校园服务智能体，具备工具调用能力。可用的工具：检索校规知识库、查询校园公告、"
+    "创建转人工工单。\n"
+    "规则：\n"
+    "1. 涉及校规/办理流程/开放时间等问题，必须调用 search_rules 获取依据；\n"
+    "2. 涉及最新通知/公告时调用 query_announcements；\n"
+    "3. 用户明确要求投诉、报修、转人工时调用 create_ticket；\n"
+    "4. 不需要工具时不要强行调用；不要编造工具参数。"
+)
+
+
+def _history_messages(state: AgentState, limit: int = 6) -> list[dict[str, str]]:
+    history = state.history or []
+    return [
+        {"role": item["role"], "content": item["content"]}
+        for item in history[-limit:]
+        if item.get("role") in {"user", "assistant"} and item.get("content")
+    ]
+
 
 def build_messages(state: AgentState, strict: bool = False) -> list[dict[str, str]]:
-    """组装证据约束 Prompt。"""
+    """组装证据约束 Prompt（含多轮历史）。"""
     blocks = [
         f"[{index}] {item.title} · {item.detail}（{item.type}，相似度 {item.score:.2f}）\n{item.snippet}"
         for index, item in enumerate(state.evidence, start=1)
     ]
     context = "\n\n".join(blocks) if blocks else "（无可用资料）"
-    return [
-        {"role": "system", "content": STRICT_SYSTEM_PROMPT if strict else SYSTEM_PROMPT},
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": STRICT_SYSTEM_PROMPT if strict else SYSTEM_PROMPT}
+    ]
+    messages.extend(_history_messages(state, limit=6))
+    messages.append(
         {
             "role": "user",
             "content": (
                 f"【背景资料】\n{context}\n\n"
-                f"【用户问题】\n{state.query}\n\n"
+                f"【用户问题】\n{state.rewritten_query or state.query}\n\n"
                 "请严格依据【背景资料】回答，并在末尾注明引用条款。"
             ),
-        },
-    ]
+        }
+    )
+    return messages
 
 
 def _sources_payload(state: AgentState) -> list[dict[str, Any]]:
@@ -94,6 +123,216 @@ async def query_understand(state: AgentState, ctx: NodeContext) -> dict[str, Any
 
 
 # ---------------------------------------------------------------------------
+# ②.1 多轮记忆 Agent（读取最近消息 + 追问改写）
+# ---------------------------------------------------------------------------
+FOLLOWUP_RE = re.compile(
+    r"^(那|那么|这个|那个|它|他|她|该|上面|前面|还有|继续)|"
+    r"(第二|第三|第四|最后)个?[条章项]|呢[?？]?$"
+)
+
+
+def _is_followup(query: str) -> bool:
+    query = query.strip()
+    return bool(FOLLOWUP_RE.search(query)) or len(query) <= 6
+
+
+async def memory_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
+    """加载最近历史；对指代型追问先改写为独立 query 再进入检索。"""
+    history: list[dict[str, str]] = []
+    if state.conversation_id:
+        try:
+            history = await ctx.services.persistence.recent_messages(
+                state.conversation_id,
+                state.user_id,
+                limit=ctx.settings.memory_window,
+            )
+        except Exception:  # noqa: BLE001 —— 记忆加载失败不阻断主流程
+            logger.exception("加载多轮记忆失败")
+
+    rewritten = state.query
+    if history and _is_followup(state.query):
+        try:
+            rewritten = await ctx.services.llm.rewrite_query(history, state.query)
+        except Exception:  # noqa: BLE001
+            logger.exception("追问改写失败，使用原始 query")
+    return {"history": history, "rewritten_query": rewritten}
+
+
+# ---------------------------------------------------------------------------
+# ②.2 Tool Calling Agent（LLM 自主选择工具 + ReAct 循环）
+# ---------------------------------------------------------------------------
+async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
+    """让 LLM 选择业务工具并执行；结果回填证据，或直接生成工具型回答。"""
+    run_id = state.run_id or uuid.uuid4().hex[:12]
+    runner = ToolRunner(ctx.services, ctx.settings)
+
+    messages: list[dict[str, Any]] = [{"role": "system", "content": TOOL_SYSTEM_PROMPT}]
+    messages.extend(_history_messages(state, limit=6))
+    messages.append({"role": "user", "content": state.rewritten_query or state.query})
+
+    results = []
+    search_evidence: list[Evidence] = []
+    tool_evidence: list[Evidence] = []
+    call_records: list[dict[str, Any]] = []
+
+    for _ in range(max(1, ctx.settings.max_tool_rounds)):
+        try:
+            assistant = await ctx.services.llm.chat_with_tools(messages, TOOL_DEFINITIONS)
+        except Exception:  # noqa: BLE001 —— LLM/Tool 故障时回退到确定性 RAG
+            logger.exception("Tool Calling LLM 调用失败，回退标准 RAG")
+            break
+
+        calls = assistant.get("tool_calls") or []
+        if not calls:
+            break
+
+        messages.append(
+            {
+                "role": "assistant",
+                "content": assistant.get("content") or "",
+                "tool_calls": [
+                    {
+                        "id": call.get("id") or f"call_{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {
+                            "name": call.get("name") or "",
+                            "arguments": call.get("arguments") or "{}",
+                        },
+                    }
+                    for call in calls
+                ],
+            }
+        )
+
+        for call in calls:
+            name = str(call.get("name") or "")
+            call_id = str(call.get("id") or f"call_{uuid.uuid4().hex[:8]}")
+            raw_arguments = call.get("arguments") or "{}"
+            if isinstance(raw_arguments, str):
+                try:
+                    arguments = json.loads(raw_arguments)
+                except json.JSONDecodeError:
+                    arguments = {}
+            else:
+                arguments = raw_arguments if isinstance(raw_arguments, dict) else {}
+
+            await ctx.emit(
+                "tool",
+                {
+                    "phase": "tool_start",
+                    "node": "tool_agent",
+                    "tool": name,
+                    "arguments": arguments,
+                },
+            )
+            result = await runner.run(
+                name,
+                arguments,
+                user_id=state.user_id,
+                conversation_id=state.conversation_id,
+                run_id=run_id,
+            )
+            await ctx.emit(
+                "tool",
+                {
+                    "phase": "tool_end",
+                    "node": "tool_agent",
+                    "tool": name,
+                    "arguments": result.arguments,
+                    "success": result.success,
+                    "summary": result.summary[:800],
+                    "latency_ms": result.latency_ms,
+                },
+            )
+            messages.append(
+                {"role": "tool", "tool_call_id": call_id, "content": result.summary}
+            )
+            results.append(result)
+            call_records.append(
+                {
+                    "name": name,
+                    "arguments": result.arguments,
+                    "success": result.success,
+                    "summary": result.summary[:500],
+                    "latency_ms": result.latency_ms,
+                }
+            )
+            if name == "search_rules":
+                search_evidence.extend(result.evidence)
+            else:
+                tool_evidence.extend(result.evidence)
+
+    if not results:
+        return {"run_id": run_id, "tool_calls": []}
+
+    update: dict[str, Any] = {
+        "run_id": run_id,
+        "tool_calls": call_records,
+        "tool_evidence": tool_evidence,
+    }
+    search_used = any(result.name == "search_rules" for result in results)
+    if search_used:
+        update.update(
+            {
+                "tool_search_used": True,
+                "vector_hits": [item for item in search_evidence if item.type == "vector"],
+                "graph_paths": [item for item in search_evidence if item.type == "graph"],
+            }
+        )
+        return update
+
+    # 只调用了公告/工单类工具：直接用工具结果生成回答，跳过 RAG 链路
+    sources: list[SourceItem] = []
+    for result in results:
+        sources.extend(result.sources)
+    evidence = [
+        Evidence(
+            type="tool",
+            title=source.title,
+            detail=source.detail,
+            snippet=source.snippet,
+            score=0.9,
+        )
+        for source in sources
+    ]
+    summaries = "\n\n".join(f"【{result.name}】{result.summary}" for result in results)
+    answer_messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": (
+                SYSTEM_PROMPT
+                + "\n5. 本轮已真实调用业务工具，请依据【工具结果】回答，不要编造工具没有返回的信息。"
+            ),
+        }
+    ]
+    answer_messages.extend(_history_messages(state, limit=6))
+    answer_messages.append(
+        {
+            "role": "user",
+            "content": (
+                f"【工具结果】\n{summaries}\n\n"
+                f"【用户问题】\n{state.query}\n\n"
+                "请简洁回答，并说明这些信息来自哪个工具。"
+            ),
+        }
+    )
+    pieces: list[str] = []
+    async for piece in ctx.services.llm.stream(answer_messages):
+        pieces.append(piece)
+        await ctx.delta(piece)
+    await ctx.emit("meta", {"sources": [source.model_dump() for source in sources], "cached": False})
+    return {
+        **update,
+        "tool_only": True,
+        "sources": sources,
+        "evidence": evidence,
+        "evidence_score": 0.9,
+        "answer": "".join(pieces),
+        "grounding_ok": True,
+    }
+
+
+# ---------------------------------------------------------------------------
 # ③④ 并行召回：检索 Agent（Qdrant）/ 图谱 Agent（Neo4j）
 # ---------------------------------------------------------------------------
 async def retrieve_vector(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
@@ -112,7 +351,7 @@ async def retrieve_graph(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
 async def fuse_evidence(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     seen: set[tuple[str, str, str]] = set()
     merged = []
-    for item in [*state.vector_hits, *state.graph_paths]:
+    for item in [*state.vector_hits, *state.graph_paths, *state.tool_evidence]:
         key = (item.type, item.title, item.detail)
         if key in seen:
             continue
@@ -229,6 +468,7 @@ async def persist_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
         not state.cached
         and not state.refused
         and not state.degraded
+        and not state.tool_only
         and state.grounding_ok
         and state.answer
     ):

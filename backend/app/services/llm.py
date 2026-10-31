@@ -76,6 +76,61 @@ class DeepSeekLLM:
         except Exception as exc:  # noqa: BLE001 —— 统一转成 LLMError 由上层兜底
             raise LLMError(friendly_llm_error(exc)) from exc
 
+    async def chat_with_tools(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """非流式 function calling：返回 content + 规范化后的 tool_calls。"""
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.settings.deepseek_model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=self.settings.llm_temperature,
+            )
+        except LLMError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise LLMError(friendly_llm_error(exc)) from exc
+
+        message = response.choices[0].message
+        calls = []
+        for call in message.tool_calls or []:
+            calls.append(
+                {
+                    "id": call.id,
+                    "name": call.function.name,
+                    "arguments": call.function.arguments,
+                }
+            )
+        return {"content": message.content or "", "tool_calls": calls}
+
+    async def rewrite_query(
+        self, history: list[dict[str, str]], query: str
+    ) -> str:
+        """多轮追问改写为可独立检索的问题（不依赖工具）。"""
+        messages: list[dict[str, Any]] = [
+            {
+                "role": "system",
+                "content": (
+                    "你是校规问答系统的查询改写器。根据对话历史，把用户的追问改写成"
+                    "一个不依赖上下文、可独立检索的完整问题；只输出改写后的问句，不要解释。"
+                ),
+            }
+        ]
+        messages.extend(history[-6:])
+        messages.append({"role": "user", "content": query})
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.settings.deepseek_model,
+                messages=messages,
+                temperature=0.0,
+            )
+            content = (response.choices[0].message.content or "").strip()
+            return content or query
+        except Exception:  # noqa: BLE001 —— 改写失败不阻断主流程
+            return query
+
 
 DEFAULT_FAKE_ANSWER = (
     "根据《学生宿舍管理规定》第四章 第18条：学生公寓每日 23:30 熄灯并关闭公共区域网络，"
@@ -93,3 +148,12 @@ class FakeLLM:
     async def stream(self, messages: list[dict[str, Any]]) -> AsyncIterator[str]:  # noqa: ARG002
         for start in range(0, len(self.answer), self.chunk_size):
             yield self.answer[start : start + self.chunk_size]
+
+    async def chat_with_tools(  # noqa: ARG002
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """离线假模型不主动选工具，保证无网络时仍走确定性 RAG 链路。"""
+        return {"content": "", "tool_calls": []}
+
+    async def rewrite_query(self, history: list[dict[str, str]], query: str) -> str:  # noqa: ARG002
+        return query

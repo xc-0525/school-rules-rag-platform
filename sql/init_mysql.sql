@@ -164,6 +164,44 @@ CREATE TABLE IF NOT EXISTS document_tag_relations (
   CONSTRAINT fk_dtr_tag FOREIGN KEY (tag_id) REFERENCES document_tags (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='文档-标签关联表';
 
+-- ----------------------------------------------------------------------------
+-- 10. 转人工 / 投诉工单表（create_ticket Tool 使用）
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tickets (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  ticket_no   VARCHAR(32)     NOT NULL COMMENT '工单号',
+  user_id     INT UNSIGNED    NOT NULL,
+  title       VARCHAR(200)    NOT NULL,
+  description TEXT            NOT NULL,
+  category    VARCHAR(50)     DEFAULT NULL,
+  status      ENUM('open','processing','closed') NOT NULL DEFAULT 'open',
+  created_at  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME        NULL DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_ticket_no (ticket_no),
+  KEY idx_ticket_user (user_id, status),
+  CONSTRAINT fk_ticket_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='转人工/投诉工单表';
+
+-- ----------------------------------------------------------------------------
+-- 11. Tool Calling 审计日志表（Agent 可观测性）
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tool_call_logs (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  run_id          VARCHAR(64)     DEFAULT NULL COMMENT '一次问答的运行 ID',
+  conversation_id BIGINT UNSIGNED DEFAULT NULL,
+  user_id         INT UNSIGNED    DEFAULT NULL,
+  tool_name       VARCHAR(50)     NOT NULL,
+  arguments       TEXT            DEFAULT NULL,
+  result_summary  TEXT            DEFAULT NULL,
+  success         TINYINT(1)      NOT NULL DEFAULT 1,
+  latency_ms      INT UNSIGNED    NOT NULL DEFAULT 0,
+  created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_tool_run (run_id),
+  KEY idx_tool_name (tool_name, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='Tool Calling 审计日志';
+
 -- ============================================================================
 -- 初始化数据
 -- ============================================================================
@@ -195,3 +233,20 @@ SELECT name FROM (
   UNION ALL SELECT '校园安全'
 ) AS seed_tags
 WHERE NOT EXISTS (SELECT 1 FROM document_tags WHERE document_tags.name = seed_tags.name);
+
+-- 演示公告（query_announcements Tool 使用）
+INSERT INTO announcements (user_id, title, content, is_pinned, status)
+SELECT 1,
+       '关于图书馆延长开放时间的通知',
+       '为方便同学复习，自本周起图书馆周一至周五开放时间延长至 22:30，周六周日 09:00-21:30，考试周另行通知。',
+       1, 'published'
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM announcements WHERE title = '关于图书馆延长开放时间的通知');
+
+INSERT INTO announcements (user_id, title, content, is_pinned, status)
+SELECT 1,
+       '校园卡服务中心迁址公告',
+       '校园卡服务中心自本周起迁至行政楼一层 105 室，办理挂失、补卡、充值业务，服务时间 08:30-17:30。',
+       0, 'published'
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM announcements WHERE title = '校园卡服务中心迁址公告');
