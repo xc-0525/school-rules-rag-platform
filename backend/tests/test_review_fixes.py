@@ -270,6 +270,57 @@ class RateLimitTests(unittest.TestCase):
             self.assertEqual(client.get("/health").status_code, 200)
 
 
+class FusionGateTests(unittest.TestCase):
+    """P1-3 质量闸门：弱图谱不得稀释向量召回。"""
+
+    def _fuse(self, settings, vector, graph):
+        state = AgentState(query="测试", vector_hits=vector, graph_paths=graph)
+        ctx = NodeContext(services=None, settings=settings, bus=NullBus())
+        return asyncio.run(nodes.fuse_evidence(state, ctx))
+
+    @staticmethod
+    def _vector(title: str, score: float) -> Evidence:
+        return Evidence(type="vector", title=title, detail="第1条", snippet="v", score=score)
+
+    @staticmethod
+    def _graph(title: str, score: float) -> Evidence:
+        return Evidence(type="graph", title=f"知识图谱 · {title}", detail="第2条", snippet="g", score=score)
+
+    def test_weak_graph_is_gated(self) -> None:
+        settings = make_settings(fusion_mode="gated", graph_quality_min_score=0.55)
+        vector = [self._vector("《A》", 0.90)]
+        graph = [self._graph("《B》", 0.46)]  # 只命中 1/4 关键词的弱证据
+        result = self._fuse(settings, vector, graph)
+        self.assertTrue(result["evidence_meta"]["graph_gated"])
+        self.assertEqual(result["evidence_meta"]["graph_kept"], 0)
+        self.assertEqual([item.title for item in result["evidence"]], ["《A》"])
+        self.assertEqual(result["evidence_score"], 0.90)
+
+    def test_strong_graph_participates(self) -> None:
+        settings = make_settings(fusion_mode="gated", graph_quality_min_score=0.55)
+        vector = [self._vector("《A》", 0.90)]
+        graph = [self._graph("《B》", 0.80)]
+        result = self._fuse(settings, vector, graph)
+        self.assertFalse(result["evidence_meta"]["graph_gated"])
+        self.assertTrue(any("《B》" in item.title for item in result["evidence"]))
+
+    def test_rrf_mode_keeps_weak_graph(self) -> None:
+        """rrf 是消融对照组：保持旧行为，弱图谱也参与融合。"""
+        settings = make_settings(fusion_mode="rrf")
+        result = self._fuse(settings, [self._vector("《A》", 0.90)], [self._graph("《B》", 0.46)])
+        self.assertFalse(result["evidence_meta"]["graph_gated"])
+        self.assertTrue(any("《B》" in item.title for item in result["evidence"]))
+
+    def test_graph_share_is_capped(self) -> None:
+        settings = make_settings(fusion_mode="gated", graph_quality_min_score=0.55, graph_max_share=0.5)
+        vector = [self._vector("《A》", 0.90)]
+        graph = [self._graph("《B》", 0.90), self._graph("《C》", 0.85), self._graph("《D》", 0.80)]
+        result = self._fuse(settings, vector, graph)
+        graph_count = sum(1 for item in result["evidence"] if item.type == "graph")
+        self.assertLessEqual(graph_count, 2, "图谱条目不得超过 50% 占比")
+        self.assertGreaterEqual(len(result["evidence"]), 2)
+
+
 class CacheAndFeedbackTests(unittest.TestCase):
     def test_cache_ttl_expiry(self) -> None:
         cache = MockSemanticCache(ttl_seconds=60, max_entries=10)

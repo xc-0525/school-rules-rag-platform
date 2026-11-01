@@ -91,7 +91,12 @@ class Settings:
     evidence_threshold: float = 0.5
     node_timeout: float = 120.0
 
-    # ---- 检索融合（P1-3）----
+    # ---- 检索融合（P1-3 / 质量闸门）----
+    # gated：图谱最高分不达标时整路不参与融合（避免弱图谱稀释向量结果）
+    # rrf  ：旧行为，两路始终参与，仅做排名融合（消融对照组）
+    fusion_mode: str = "gated"
+    graph_quality_min_score: float = 0.55    # 图谱一路的准入线（低于则整路剔除）
+    graph_max_share: float = 0.5             # 最终证据中图谱条目占比上限
     rrf_k: int = 60                          # RRF 平滑常数
     graph_min_score: float = 0.30            # 图谱证据的最低基础分
     graph_max_score: float = 0.95            # 图谱证据的满分
@@ -157,6 +162,9 @@ class Settings:
             max_tool_rounds=_env_int("MAX_TOOL_ROUNDS", 2),
             memory_window=_env_int("MEMORY_WINDOW", 6),
             evidence_threshold=_env_float("EVIDENCE_THRESHOLD", 0.5),
+            fusion_mode=os.getenv("FUSION_MODE", "gated").strip().lower(),
+            graph_quality_min_score=_env_float("GRAPH_QUALITY_MIN_SCORE", 0.55),
+            graph_max_share=_env_float("GRAPH_MAX_SHARE", 0.5),
             rrf_k=_env_int("RRF_K", 60),
             graph_min_score=_env_float("GRAPH_MIN_SCORE", 0.30),
             graph_max_score=_env_float("GRAPH_MAX_SCORE", 0.95),

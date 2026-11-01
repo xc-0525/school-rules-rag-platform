@@ -149,14 +149,16 @@ def format_markdown(settings: Settings, retrieval: dict, e2e: dict | None, count
         "",
         f"- 语料模式：vector=`{settings.vector_mode}` / graph=`{settings.graph_mode}` / llm=`{settings.llm_mode}`",
         f"- 题量：{count}",
-        f"- 证据阈值：{settings.evidence_threshold}；RRF k={settings.rrf_k}",
+        f"- 证据阈值：{settings.evidence_threshold}；融合模式={settings.fusion_mode}；RRF k={settings.rrf_k}",
+        f"- 图谱闸门：准入分 {settings.graph_quality_min_score}；条目占比上限 {settings.graph_max_share}",
         "",
         "## 检索指标",
         "",
         "| 融合配置 | recall@3 | MRR | 命中/总数 | 图谱空召回率 |",
         "| --- | --- | --- | --- | --- |",
     ]
-    label = {"vector": "仅向量", "graph": "仅图谱", "both": "双路 + RRF"}
+    both_label = f"双路（{settings.fusion_mode}）"
+    label = {"vector": "仅向量", "graph": "仅图谱", "both": both_label}
     for mode, row in retrieval.items():
         lines.append(
             f"| {label.get(mode, mode)} | {row['recall']:.3f} | {row['mrr']:.3f} | "
@@ -183,6 +185,8 @@ def format_markdown(settings: Settings, retrieval: dict, e2e: dict | None, count
 
 async def main_async(args) -> int:
     settings = Settings.from_env()
+    if args.fusion:
+        settings.fusion_mode = args.fusion
     services = build_services(settings)
     if args.no_persist:
         # 评测不写生产库：避免把测试问答灌进会话表
@@ -227,6 +231,9 @@ def main() -> int:
     parser.add_argument("--only", default="vector,graph,both", help="融合配置，逗号分隔")
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 题")
     parser.add_argument("--with-llm", action="store_true", help="额外跑端到端（会调用大模型）")
+    parser.add_argument(
+        "--fusion", default="", choices=["", "gated", "rrf"], help="覆盖融合策略，用于消融对比"
+    )
     parser.add_argument("--no-persist", action="store_true", default=True, help="不写生产库（默认开启）")
     parser.add_argument("--md", default="", help="Markdown 报告输出路径")
     parser.add_argument("--json", default="", help="JSON 结果输出路径")
