@@ -566,7 +566,9 @@ school-rules-rag-platform/
 │   ├── app/                 # ✅ v2 正式工程
 │   │   ├── main.py          #   应用工厂 + 启动预热 + /health
 │   │   ├── core/            #   配置 / 密码哈希
-│   │   ├── agents/          #   图引擎 + 图定义 + 11 节点 + SSE 事件
+│   │   ├── agents/          #   图引擎 + 图定义 + 节点
+│   │   │                    #   nodes.py 只放编排节点；提示词/融合/引用校验/
+│   │   │                    #   工具调用已拆到 prompts|prompting|fusion|citations|tools_node
 │   │   ├── api/v1/          #   chat / conversations（会话历史、反馈）
 │   │   ├── services/        #   LLM / Qdrant+BGE / Neo4j / MySQL / 语义缓存适配器
 │   │   ├── db/              #   SQLAlchemy 模型与引擎
