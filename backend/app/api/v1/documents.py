@@ -18,7 +18,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from sqlalchemy import select
 
 from app.core.config import BASE_DIR, Settings
@@ -159,13 +159,19 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         require_mysql()
 
     async def _ingest_upload(
-        raw: bytes,
+        raw: bytes | None,
         filename: str,
         title: str | None,
         replace: bool,
         uploader: AuthUser,
+        target_path: Path | None = None,
     ) -> DocumentUploadResponse:
-        """上传公共逻辑：保存 → 解析 → 三库入库。"""
+        """上传公共逻辑：保存 → 解析 → 三库入库。
+
+        两种来源：
+        - `raw`：旧 JSON 通道（base64 解码后的 bytes）；
+        - `target_path`：新 raw 通道已经边收边落盘的文件（避免整文件驻留内存）。
+        """
         safe_name = Path(filename or "upload").name
         suffix = Path(safe_name).suffix.lower()
         if suffix not in ALLOWED_SUFFIXES:
@@ -173,11 +179,23 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
                 status_code=400,
                 detail=f"暂只支持 {sorted(ALLOWED_SUFFIXES)}，当前文件：{safe_name or '未知'}",
             )
-        if not raw:
-            raise HTTPException(status_code=400, detail="文件内容为空")
         limit = MAX_PDF_BYTES if suffix == ".pdf" else MAX_TEXT_BYTES
-        if len(raw) > limit:
-            raise HTTPException(status_code=413, detail=f"文件超过 {limit // (1024 * 1024)}MB 限制")
+        if target_path is None:
+            if not raw:
+                raise HTTPException(status_code=400, detail="文件内容为空")
+            if len(raw) > limit:
+                raise HTTPException(
+                    status_code=413, detail=f"文件超过 {limit // (1024 * 1024)}MB 限制"
+                )
+        else:
+            if not target_path.is_file() or target_path.stat().st_size == 0:
+                target_path.unlink(missing_ok=True)
+                raise HTTPException(status_code=400, detail="文件内容为空")
+            if target_path.stat().st_size > limit:
+                target_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=413, detail=f"文件超过 {limit // (1024 * 1024)}MB 限制"
+                )
 
         require_real_ingestion()
 
@@ -192,18 +210,23 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
                 status_code=503, detail=f"入库依赖预检失败：{type(exc).__name__}: {exc}"
             ) from exc
 
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        target = UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
-        target.write_bytes(raw)
+        if target_path is not None:
+            target = target_path
+        else:
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            target = UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
+            target.write_bytes(raw)
 
         try:
             if suffix == ".pdf":
+                # 只读一次：raw 通道下这里才会把文件读进内存（约 1 倍文件大小）
+                data = raw if raw is not None else target.read_bytes()
                 try:
-                    document = parse_pdf_bytes(raw, filename=safe_name, title=title)
+                    document = parse_pdf_bytes(data, filename=safe_name, title=title)
                 except PDFTextError:
                     # 文字层为空 → 自动尝试 OCR（装了引擎才会成功）
                     document = await run_in_ingest_pool(
-                        ocr_pdf_bytes, raw, safe_name, title
+                        ocr_pdf_bytes, data, safe_name, title
                     )
             else:
                 document = parse_file(target)
@@ -306,6 +329,68 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
             return await _ingest_upload(
                 raw, Path(file.filename or "upload").name, title, replace, user
             )
+
+    # ---------------- 原始字节流上传（推荐：不做 base64，边收边落盘） ----------------
+    @router.post(
+        "/documents/upload-raw",
+        response_model=DocumentUploadResponse,
+        summary="上传文档（application/octet-stream，边收边落盘）",
+    )
+    async def upload_document_raw(
+        request: Request,
+        filename: str = Query(..., description="原始文件名（含扩展名）"),
+        title: str | None = Query(default=None),
+        replace: bool = Query(default=True),
+        user: AuthUser = Depends(current_user),
+    ):
+        """P2-11：不经 base64，直接接收文件字节流。
+
+        旧 JSON 通道要把文件编码成 base64（体积 +33%），服务端再解码一份，
+        20MB 的 PDF 峰值能到 100MB 以上。这里改成边收边写：内存占用与文件大小
+        无关，且累计超限立刻中止并删除半成品。
+        """
+        ensure_admin(user)  # 先鉴权再读 body，未授权请求不会写磁盘
+
+        safe_name = Path(filename or "").name
+        suffix = Path(safe_name).suffix.lower()
+        if suffix not in ALLOWED_SUFFIXES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"暂只支持 {sorted(ALLOWED_SUFFIXES)}，当前文件：{safe_name or '未知'}",
+            )
+        limit = MAX_PDF_BYTES if suffix == ".pdf" else MAX_TEXT_BYTES
+
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        target = UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
+        total = 0
+        try:
+            with target.open("wb") as handle:
+                async for chunk in request.stream():
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > limit:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"文件超过 {limit // (1024 * 1024)}MB 限制",
+                        )
+                    handle.write(chunk)
+        except HTTPException:
+            target.unlink(missing_ok=True)
+            raise
+        except Exception as exc:  # noqa: BLE001 —— 网络中断等
+            target.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400, detail=f"上传中断：{type(exc).__name__}"
+            ) from exc
+
+        if total == 0:
+            target.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="文件内容为空")
+
+        return await _ingest_upload(
+            None, safe_name, title, replace, user, target_path=target
+        )
 
     # ---------------- 列表 / 详情 / 删除 ----------------
     @router.get("/documents", response_model=list[DocumentItem], summary="文档列表")

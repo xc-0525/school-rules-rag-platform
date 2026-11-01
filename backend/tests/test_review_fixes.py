@@ -410,6 +410,76 @@ class TicketFlowTests(unittest.TestCase):
         self.assertIn("ticket_no", confirmed.json())
 
 
+class UploadRawTests(unittest.TestCase):
+    """P2-11：原始字节流上传——先鉴权、边收边落盘、超限即止。"""
+
+    def _client(self, dev_mode: bool = False):
+        if dev_mode:
+            settings = make_settings()
+        else:
+            settings = Settings(llm_mode="fake", vector_mode="mock", graph_mode="mock")
+        services = build_services(settings)
+        services.llm = FakeLLM()
+        return TestClient(create_app(settings, services=services))
+
+    @staticmethod
+    def _upload_dir_files() -> set[str]:
+        from app.api.v1.documents import UPLOAD_DIR
+
+        if not UPLOAD_DIR.is_dir():
+            return set()
+        return {item.name for item in UPLOAD_DIR.iterdir() if item.is_file()}
+
+    def test_requires_login(self) -> None:
+        client = self._client()
+        response = client.post(
+            "/api/v1/documents/upload-raw?filename=a.md", content=b"# t\n\u7b2c1\u6761 x"
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_student_forbidden(self) -> None:
+        client = self._client()
+        headers = {"Authorization": f"Bearer {token_for(2, 'student', 'student')}"}
+        response = client.post(
+            "/api/v1/documents/upload-raw?filename=a.md",
+            content=b"# t",
+            headers=headers,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_oversize_is_rejected_and_cleaned(self) -> None:
+        before = self._upload_dir_files()
+        client = self._client(dev_mode=True)
+        with patch("app.api.v1.documents.MAX_PDF_BYTES", 1024):
+            response = client.post(
+                "/api/v1/documents/upload-raw?filename=big.pdf",
+                content=b"x" * 4096,
+                headers={"Content-Type": "application/octet-stream"},
+            )
+        self.assertEqual(response.status_code, 413, response.text)
+        # 半成品必须被删除，不能留在 uploads 目录里
+        self.assertEqual(self._upload_dir_files(), before)
+
+    def test_unsupported_suffix_rejected(self) -> None:
+        client = self._client(dev_mode=True)
+        response = client.post(
+            "/api/v1/documents/upload-raw?filename=a.exe", content=b"x"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("暂只支持", response.json()["detail"])
+
+    def test_valid_stream_reaches_ingest(self) -> None:
+        """mock 向量模式下应停在"无法入库"的提示，说明流式接收与解析入口已走通。"""
+        client = self._client(dev_mode=True)
+        response = client.post(
+            "/api/v1/documents/upload-raw?filename=a.md",
+            content="# 测试\n第1条 测试条款".encode("utf-8"),
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("mock 向量模式", response.json()["detail"])
+
+
 class CacheAndFeedbackTests(unittest.TestCase):
     def test_cache_ttl_expiry(self) -> None:
         cache = MockSemanticCache(ttl_seconds=60, max_entries=10)

@@ -67,7 +67,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { deleteDocument, fetchDocuments, uploadDocument } from '../api/client'
+import { deleteDocument, fetchDocuments, uploadDocumentRaw } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { DocumentItem } from '../types'
 
@@ -88,16 +88,6 @@ function pickFile() {
   fileInput.value?.click()
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  const chunkSize = 0x8000
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
-  }
-  return btoa(binary)
-}
-
 async function onFileChange(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -114,25 +104,15 @@ async function upload(file: File) {
   uploading.value = true
   const lower = file.name.toLowerCase()
   try {
-    const common = {
-      filename: file.name,
-      title: title.value.trim() || undefined,
-      replace: replace.value,
-    }
-    let result
-    if (lower.endsWith('.pdf')) {
-      const buffer = await file.arrayBuffer()
-      result = await uploadDocument({
-        ...common,
-        content_base64: arrayBufferToBase64(buffer),
-      })
-    } else if (lower.endsWith('.md') || lower.endsWith('.txt')) {
-      const text = await file.text()
-      result = await uploadDocument({ ...common, content: text })
-    } else {
+    if (!lower.endsWith('.pdf') && !lower.endsWith('.md') && !lower.endsWith('.txt')) {
       ElMessage.warning('只支持 .md / .txt / .pdf')
       return
     }
+    // 统一走原始字节流：不再 FileReader → base64（20MB 文件可省掉近百兆内存）
+    const result = await uploadDocumentRaw(file, {
+      title: title.value.trim() || undefined,
+      replace: replace.value,
+    })
     ElMessage.success(`入库成功：#${result.document_id} ${result.title}，共 ${result.chunk_count} 条`)
     title.value = ''
     await load()

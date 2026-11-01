@@ -115,6 +115,44 @@ export function deleteDocument(id: number): Promise<{ deleted: boolean; document
   return request(`/api/v1/documents/${id}`, { method: 'DELETE' })
 }
 
+/** 原始字节流上传：浏览器不做 base64，服务端边收边落盘 */
+export async function uploadDocumentRaw(
+  file: File,
+  options: { title?: string; replace?: boolean } = {},
+): Promise<UploadResult> {
+  const params = new URLSearchParams({
+    filename: file.name,
+    replace: String(options.replace ?? true),
+  })
+  if (options.title) params.set('title', options.title)
+
+  const headers = withAuth()
+  headers.set('Content-Type', 'application/octet-stream')
+
+  const response = await fetch(`${BASE}/api/v1/documents/upload-raw?${params.toString()}`, {
+    method: 'POST',
+    headers,
+    body: file,
+  })
+  if (response.status === 401) {
+    clearSession()
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
+  }
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`
+    try {
+      const data = await response.json()
+      message = data.detail || message
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message)
+  }
+  return (await response.json()) as UploadResult
+}
+
 export function uploadDocument(payload: {
   filename: string
   content?: string
