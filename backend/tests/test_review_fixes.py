@@ -229,7 +229,7 @@ class FusionTests(unittest.TestCase):
         self.assertGreaterEqual(calibrate_graph_score(2, 4), threshold)
 
     def test_rrf_prefers_multi_source_evidence(self) -> None:
-        settings = make_settings()
+        settings = make_settings(fusion_mode="rrf")
         shared = Evidence(type="vector", title="《A》", detail="第1条", snippet="a", score=0.90)
         vector_only = Evidence(type="vector", title="《B》", detail="第2条", snippet="b", score=0.85)
         graph_other = Evidence(type="graph", title="知识图谱 · 《C》", detail="第3条", snippet="c", score=0.80)
@@ -289,6 +289,38 @@ class FusionGateTests(unittest.TestCase):
     @staticmethod
     def _graph(title: str, score: float) -> Evidence:
         return Evidence(type="graph", title=f"知识图谱 · {title}", detail="第2条", snippet="g", score=score)
+
+    def test_append_keeps_vector_order_and_puts_graph_last(self) -> None:
+        """append 模式：向量定排序，图谱只追加未命中条款（实测 MRR 不劣于仅向量）。"""
+        settings = make_settings(fusion_mode="append")
+        vector = [self._vector("《A》", 0.90), self._vector("《B》", 0.80)]
+        graph = [self._graph("《C》", 0.95), self._graph("《D》", 0.90)]
+        result = self._fuse(settings, vector, graph)
+        titles = [item.title for item in result["evidence"]]
+        self.assertEqual(titles[:2], ["《A》", "《B》"], "向量顺序必须保持不变")
+        self.assertTrue(titles[-1].startswith("知识图谱"), "图谱证据应排在末尾")
+        self.assertEqual(result["evidence_meta"]["fusion_mode"], "append")
+
+    def test_append_skips_graph_item_already_in_vector(self) -> None:
+        """同一条款已被向量召回时，图谱不再重复追加（按正文去重）。"""
+        settings = make_settings(fusion_mode="append")
+        vector = [self._vector("《A》", 0.90)]
+        # 真实场景下同一条款的正文一致，只是图谱多了标题前缀
+        graph = [
+            Evidence(
+                type="graph", title="知识图谱 · 《A》", detail="第1条", snippet="v", score=0.95
+            )
+        ]
+        result = self._fuse(settings, vector, graph)
+        self.assertEqual(len(result["evidence"]), 1, "同一条款不应重复进入证据列表")
+        self.assertEqual(result["evidence_meta"]["graph_kept"], 0)
+
+    def test_append_respects_share_cap(self) -> None:
+        settings = make_settings(fusion_mode="append", graph_max_share=0.5)
+        vector = [self._vector("《A》", 0.90)]
+        graph = [self._graph("《B》", 0.95), self._graph("《C》", 0.90), self._graph("《D》", 0.85)]
+        result = self._fuse(settings, vector, graph)
+        self.assertLessEqual(result["evidence_meta"]["graph_kept"], 2)
 
     def test_weak_graph_is_gated(self) -> None:
         settings = make_settings(fusion_mode="gated", graph_quality_min_score=0.55)

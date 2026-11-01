@@ -447,8 +447,9 @@ ALLOW_REGISTRATION=1
 MAX_TOOL_ROUNDS=2
 MEMORY_WINDOW=6
 
-# 检索融合：gated=图谱质量不达标时整路不参与（默认）；rrf=两路始终参与（消融对照）
-FUSION_MODE=gated
+# 检索融合：append=向量定排序、图谱只补充未命中条款（默认）；
+#            gated=图谱质量不达标时整路不参与；rrf=两路等权（消融对照）
+FUSION_MODE=append
 GRAPH_QUALITY_MIN_SCORE=0.55
 GRAPH_MAX_SHARE=0.5
 
@@ -619,7 +620,9 @@ school-rules-rag-platform/
   引用校验三态 + 条款号核对、查询拆分为 generation/retrieval、查询扩展不再空转、图谱分按覆盖率标定 + RRF 融合、
   工单意图门禁与幂等、缓存 TTL、SSE reset 事件与断开取消、审计日志转线程池、上传者身份贯通
 - **离线评测脚本**：`backend/scripts/evaluate.py` + `tests/golden/qa_set.json`（recall@3 / MRR / 拒答准确率 / 引用通过率 / p50·p95），支持 `--fusion gated|rrf` 做融合消融
-- **融合质量闸门**：图谱最高分不达准入线时整路剔除（`FUSION_MODE=gated`），并按 `GRAPH_MAX_SHARE` 限制图谱条目占比，避免弱图谱稀释向量召回
+- **融合策略（真实语料实测定标）**：默认 `FUSION_MODE=append`——向量决定排序，图谱只补充向量未命中的条款。
+  20 题消融：仅向量 recall@3 0.800 / MRR 0.600；等权 RRF 0.850 / 0.454（排序被弱图谱拖累）；append **0.850 / 0.610**
+- **图谱不参与证据分**：`evidence_score` 只取向量 cosine，避免"关键词命中即判证据充分"导致拒答链路失效
 - **工单二次确认**：Agent 只生成草稿，用户在前端点"确认提交"后才通过 `POST /api/v1/tickets` 落库，同参数幂等
 - **上传链路去 base64（P2-11）**：新增 `upload-raw` 原始字节流通道，边收边落盘、累计超限即时 413 并清理半成品；前端不再 `FileReader → base64`（20MB PDF 峰值内存从约 100MB 降到约 1 倍文件大小）
 - **请求级 trace_id**：响应头回显 `X-Request-ID`，并写入每条应用日志与 `done` 事件，排查一次问答只需一个 id

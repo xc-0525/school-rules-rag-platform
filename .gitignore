@@ -222,3 +222,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# WorkBuddy 工具工作目录（本地记忆，不进版本库）
+.workbuddy/

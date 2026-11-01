@@ -198,6 +198,17 @@ async def main_async(args) -> int:
 
     retrieval = await run_retrieval(services, settings, items, modes)
     e2e = await run_e2e(services, settings, items) if args.with_llm else None
+    if e2e and args.verbose:
+        expected_map = {item["id"]: item["answerable"] for item in items}
+        print("\n=== 逐题明细 ===")
+        print(f"{'题号':5s} {'应拒答':6s} {'实际':5s} {'引用':10s} {'时延':>7s}  问题")
+        for row in e2e["details"]:
+            expect_refuse = not expected_map[row["id"]]
+            flag = "OK " if row["refused"] == expect_refuse else "!! "
+            print(
+                f"{flag}{row['id']:4s} {str(expect_refuse):6s} {str(row['refused']):5s} "
+                f"{row['grounding_status']:10s} {row['latency_ms']:6d}ms  {row['question'][:26]}"
+            )
 
     report = format_markdown(settings, retrieval, e2e, len(items))
     print(report)
@@ -232,11 +243,12 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 题")
     parser.add_argument("--with-llm", action="store_true", help="额外跑端到端（会调用大模型）")
     parser.add_argument(
-        "--fusion", default="", choices=["", "gated", "rrf"], help="覆盖融合策略，用于消融对比"
+        "--fusion", default="", choices=["", "append", "gated", "rrf"], help="覆盖融合策略，用于消融对比"
     )
     parser.add_argument("--no-persist", action="store_true", default=True, help="不写生产库（默认开启）")
     parser.add_argument("--md", default="", help="Markdown 报告输出路径")
     parser.add_argument("--json", default="", help="JSON 结果输出路径")
+    parser.add_argument("--verbose", action="store_true", help="打印逐题明细（拒答/引用/时延）")
     args = parser.parse_args()
     return asyncio.run(main_async(args))
 

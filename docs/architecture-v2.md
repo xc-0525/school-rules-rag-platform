@@ -90,8 +90,9 @@ flowchart TD
 | 机制 | 实现 | 说明 |
 | --- | --- | --- |
 | 图谱分数标定 | `stores.calibrate_graph_score` | 按关键词覆盖率线性折算到 0~1；1/4 命中约 0.46（低于阈值，会触发查询扩展），2/4 约 0.63。旧实现 `0.55 + 0.1*hits` 会恒大于向量 cosine，导致"图谱一命中就判充分" |
-| 融合排序 | RRF（`RRF_K`，默认 60） | 只看排名、不看原始量纲；`evidence_score` 仍取标定后的 0~1 分，避免阈值语义被改掉 |
-| 质量闸门 | `FUSION_MODE=gated` | 图谱最高分低于 `GRAPH_QUALITY_MIN_SCORE` 时整路不参与融合，`evidence_meta.graph_gated=true` 留痕；`rrf` 模式保留旧行为作消融对照 |
+| 融合排序 | `FUSION_MODE=append`（默认） | 向量检索决定排序，图谱只补充向量未命中的条款并追加到末尾。真实语料 20 题实测：仅向量 recall@3 0.800 / MRR 0.600，等权 RRF 0.850 / 0.454（排序被拖累），append 0.850 / 0.610。结论：图谱在当前语料下只有补充召回价值，不具备排序价值 |
+| 图谱不参与证据分 | `_evidence_score` | `evidence_score` 只取向量 cosine；图谱分是按关键词覆盖率标定的代理值（真实语料下普遍 0.95），参与取最大值会让"证据充分"判定失效 |
+| 质量闸门 | `GRAPH_QUALITY_MIN_SCORE`（gated 模式） | 图谱最高分低于准入线时整路不参与融合，`evidence_meta.graph_gated=true` 留痕。注意：真实语料下图谱分普遍 0.95，闸门几乎不触发，故默认改用 append |
 | 占比上限 | `GRAPH_MAX_SHARE` | 最终证据中图谱条目不超过该比例，避免挤占 prompt |
 | 引用校验 | 三态 `verified / unverified / skipped` | 答案里出现的每个条款号都必须来自召回集（编造"第99条"直接不通过）；工具直答标 `skipped`，不写缓存、不计入引用通过率 |
 

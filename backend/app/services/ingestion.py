@@ -13,6 +13,7 @@ rules_parser 解析 → MySQL documents/chunks → BGE 向量化 → Qdrant upse
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -23,6 +24,8 @@ from app.core.config import BASE_DIR, Settings
 from app.db.session import new_session
 from app.services.embedding import BGEEmbedder
 from app.services.rules_parser import ParsedDocument, load_documents
+
+logger = logging.getLogger("app.ingestion")
 
 DEMO_USER_ID = 1
 
@@ -187,7 +190,29 @@ class RulesIngestor:
         existing = {item.name for item in self._client.get_collections().collections}
         if reset and self.collection in existing:
             self._client.delete_collection(self.collection)
-            existing.discard(self.collection)
+            # delete_collection 在本地嵌入式模式下是直接删集合目录，遇到文件锁/权限
+            # 被拦截时**不会抛异常**，此前代码无条件 discard 就继续写入，
+            # 结果新旧向量叠加（实测 42 条旧样例 + 498 条真实语料 = 540 点）。
+            # 这里必须复查，删不掉就退化为"清空所有点"，仍失败则直接报错。
+            existing = {item.name for item in self._client.get_collections().collections}
+            if self.collection in existing:
+                from qdrant_client.models import Filter, FilterSelector
+
+                logger.warning(
+                    "Qdrant 集合 %s 删除未生效（本地模式删除目录被拦截），退化为清空全部点",
+                    self.collection,
+                )
+                self._client.delete(
+                    collection_name=self.collection,
+                    points_selector=FilterSelector(filter=Filter()),
+                )
+                left = self._client.get_collection(self.collection).points_count or 0
+                if left:
+                    raise RuntimeError(
+                        f"Qdrant 集合 {self.collection} 重置失败，仍有 {left} 个点；"
+                        "请先停止后端并删除 backend/data/qdrant 后重试"
+                    )
+                # 注意：清空点后集合仍然存在，不能 discard，否则下面会重复 create 报冲突
         if self.collection not in existing:
             dimension = len(self.embedder.encode_one("测试"))
             self._client.create_collection(
