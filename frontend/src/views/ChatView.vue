@@ -33,6 +33,7 @@
         :key="index"
         :message="message"
         @feedback="(rating) => onFeedback(message, rating)"
+        @confirm-ticket="(draft) => onConfirmTicket(index, draft)"
       />
     </div>
 
@@ -57,8 +58,8 @@ import { ElMessage } from 'element-plus'
 import MessageBubble from '../components/MessageBubble.vue'
 import { useChatStore } from '../stores/chat'
 import { streamChat } from '../api/sse'
-import { sendFeedback } from '../api/client'
-import type { Message } from '../types'
+import { confirmTicket, sendFeedback } from '../api/client'
+import type { Message, TicketDraft } from '../types'
 
 const store = useChatStore()
 const input = ref('')
@@ -132,6 +133,24 @@ function useExample(question: string) {
 function newConversation() {
   store.resetConversation()
   input.value = ''
+}
+
+async function onConfirmTicket(index: number, draft: TicketDraft) {
+  try {
+    const result = await confirmTicket({
+      title: draft.title,
+      description: draft.description,
+      category: draft.category,
+    })
+    store.setTicketNo(index, result.ticket_no)
+    ElMessage.success(
+      result.reused
+        ? `已存在相同工单：${result.ticket_no}`
+        : `工单已提交：${result.ticket_no}`,
+    )
+  } catch (error: any) {
+    ElMessage.error(`工单提交失败：${error?.message || error}`)
+  }
 }
 
 async function onFeedback(message: Message, rating: number) {

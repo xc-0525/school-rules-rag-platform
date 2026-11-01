@@ -37,6 +37,31 @@
       />
       <SourceList v-if="message.role === 'assistant'" :sources="message.sources" />
 
+      <div
+        v-if="message.role === 'assistant' && message.toolDrafts && message.toolDrafts.length"
+        class="ticket-draft"
+      >
+        <div v-for="(draft, index) in message.toolDrafts" :key="index" class="ticket-draft-item">
+          <div class="ticket-draft-title">工单草稿 · {{ draft.title }}（{{ draft.category }}）</div>
+          <div class="ticket-draft-desc">{{ draft.description }}</div>
+          <div class="ticket-draft-actions">
+            <el-tag v-if="message.ticketNo" type="success" effect="plain">
+              已提交：{{ message.ticketNo }}
+            </el-tag>
+            <el-button
+              v-else
+              size="small"
+              type="primary"
+              :loading="confirming"
+              @click="confirmTicket(draft)"
+            >
+              确认提交工单
+            </el-button>
+            <span class="ticket-draft-hint">未确认前不会写入工单库</span>
+          </div>
+        </div>
+      </div>
+
       <div v-if="message.role === 'assistant' && !message.pending && !message.error && message.id" class="feedback-row">
         <span>这个回答有帮助吗？</span>
         <el-button text size="small" :type="rating === 1 ? 'success' : ''" @click="submitFeedback(1)">
@@ -52,17 +77,26 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { Message } from '../types'
+import type { Message, TicketDraft } from '../types'
 import { renderMarkdown } from '../utils/markdown'
 import AgentTrace from './AgentTrace.vue'
 import SourceList from './SourceList.vue'
 
 const props = defineProps<{ message: Message }>()
-const emit = defineEmits<{ (event: 'feedback', rating: number): void }>()
+const emit = defineEmits<{
+  (event: 'feedback', rating: number): void
+  (event: 'confirmTicket', draft: TicketDraft): void
+}>()
 const rating = ref(0)
+const confirming = ref(false)
 
 function submitFeedback(value: number) {
   rating.value = value
   emit('feedback', value)
+}
+
+function confirmTicket(draft: TicketDraft) {
+  confirming.value = true
+  emit('confirmTicket', draft)
 }
 </script>

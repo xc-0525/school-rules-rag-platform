@@ -93,6 +93,19 @@ export function sendFeedback(messageId: number, rating: number, comment?: string
   })
 }
 
+// ---------------- 工单 ----------------
+export function confirmTicket(payload: {
+  title: string
+  description: string
+  category: string
+}): Promise<{ ticket_no: string; status: string; reused: boolean }> {
+  return request('/api/v1/tickets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
 // ---------------- 文档 ----------------
 export function fetchDocuments(): Promise<DocumentItem[]> {
   return request<DocumentItem[]>('/api/v1/documents')

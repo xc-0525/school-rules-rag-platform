@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from app.schemas.chat import Evidence, SourceItem
+from app.services.tickets import create_ticket as create_ticket_service
 
 logger = logging.getLogger("app.tools")
 
@@ -338,25 +339,34 @@ class ToolRunner:
                         snippet=draft,
                     )
                 ],
-                payload={"status": "draft", "requires_confirmation": True},
+                payload={
+                    "status": "draft",
+                    "requires_confirmation": True,
+                    # 结构化回传草稿，前端"确认提交"直接用它调 POST /api/v1/tickets
+                    "title": title,
+                    "description": description,
+                    "category": category,
+                },
             )
 
-        if self.settings.mysql_url:
-            ticket_no = await asyncio.to_thread(
-                self._create_ticket_sync,
-                title,
-                description,
-                category,
-                user_id,
-            )
-        else:
-            ticket_no = self._mock_ticket_no()
+        # 与 POST /api/v1/tickets 共用同一套幂等逻辑（services/tickets.py）
+        receipt = await asyncio.to_thread(
+            create_ticket_service,
+            self.settings,
+            user_id,
+            title,
+            description,
+            category,
+        )
+        ticket_no = receipt.ticket_no
 
         summary = (
             f"已提交转人工工单：{ticket_no}\n"
             f"标题：{title}\n分类：{category}\n"
             "学工部门会尽快跟进；如需补充材料，请保留工单号。"
         )
+        if receipt.reused:
+            summary = summary.replace("已提交转人工工单", "已存在相同工单（未重复创建）")
         return ToolResult(
             name="create_ticket",
             arguments={"title": title, "description": description, "category": category},
@@ -370,50 +380,8 @@ class ToolRunner:
                     snippet=summary,
                 )
             ],
-            payload={"ticket_no": ticket_no, "status": "open"},
+            payload={"ticket_no": ticket_no, "status": receipt.status, "reused": receipt.reused},
         )
-
-    def _create_ticket_sync(
-        self, title: str, description: str, category: str, user_id: int
-    ) -> str:
-        from app.db.models import Ticket
-        from app.db.session import new_session
-
-        window = int(getattr(self.settings, "ticket_idempotency_seconds", 600) or 0)
-        with new_session(self.settings.mysql_url) as session:
-            if window > 0:
-                # 幂等：同一用户、同标题、同描述在窗口内复用已有工单，避免重复建单
-                existing = (
-                    session.query(Ticket)
-                    .filter(
-                        Ticket.user_id == (user_id or 1),
-                        Ticket.title == title[:200],
-                        Ticket.description == description,
-                        Ticket.created_at >= datetime.now() - timedelta(seconds=window),
-                    )
-                    .order_by(Ticket.id.desc())
-                    .first()
-                )
-                if existing is not None:
-                    return existing.ticket_no
-            ticket = Ticket(
-                ticket_no=self._mock_ticket_no(),
-                user_id=user_id or 1,
-                title=title[:200],
-                description=description,
-                category=category[:50],
-                status="open",
-                updated_at=datetime.now(),
-            )
-            session.add(ticket)
-            session.flush()
-            ticket.ticket_no = f"T{datetime.now():%Y%m%d}{int(ticket.id):06d}"
-            session.commit()
-            return ticket.ticket_no
-
-    @staticmethod
-    def _mock_ticket_no() -> str:
-        return f"T{datetime.now():%Y%m%d}{uuid.uuid4().hex[:6].upper()}"
 
     # ------------------------------------------------------------------ 审计日志
     def _log(

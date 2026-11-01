@@ -74,8 +74,15 @@ export const useChatStore = defineStore('chat', {
       message.runtime = payload.runtime
       // 落库回执直接带 message_id，省掉"再查一次会话详情"的额外请求
       if (payload.message_id) message.id = payload.message_id
+      if (payload.tool_drafts?.length) message.toolDrafts = payload.tool_drafts
       message.pending = false
       if (payload.runtime) this.lastRuntime = payload.runtime
+    },
+
+    /** 工单确认成功后记录工单号，按钮变为只读 */
+    setTicketNo(index: number, ticketNo: string) {
+      const message = this.messages[index]
+      if (message) message.ticketNo = ticketNo
     },
 
     failMessage(index: number, error: string) {

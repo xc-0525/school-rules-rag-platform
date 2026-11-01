@@ -54,6 +54,7 @@ def _done_payload(state: AgentState, engine: WorkflowEngine, started: float) -> 
         "grounding_reason": state.grounding_reason,
         "conversation_id": state.conversation_id,
         "message_id": state.message_id,
+        "tool_drafts": state.tool_drafts,
         "intent": state.intent,
         "expansion_terms": state.expansion_terms,
         "evidence_meta": state.evidence_meta,
@@ -157,6 +158,7 @@ def build_router(
                 grounding_reason=final.grounding_reason,
                 conversation_id=final.conversation_id,
                 message_id=final.message_id,
+                tool_drafts=final.tool_drafts,
                 runtime=engine.runtime_info(final),
             )
 

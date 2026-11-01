@@ -30,9 +30,12 @@ from app.schemas.chat import Evidence  # noqa: E402
 from app.services import lexicon  # noqa: E402
 from app.services.auth import MOCK_ANONYMOUS_ID, AuthUser, auth_tokens  # noqa: E402
 from app.services.container import build_services  # noqa: E402
+from app.agents.tools import ToolRunner  # noqa: E402
 from app.services.llm import FakeLLM  # noqa: E402
 from app.services.persistence import MockPersistence  # noqa: E402
+from tests.test_tools_memory import build_services_for_test  # noqa: E402
 from app.services.stores import MockSemanticCache, calibrate_graph_score  # noqa: E402
+from app.services.tickets import clear_mock_tickets  # noqa: E402
 
 
 def make_settings(**overrides) -> Settings:
@@ -319,6 +322,92 @@ class FusionGateTests(unittest.TestCase):
         graph_count = sum(1 for item in result["evidence"] if item.type == "graph")
         self.assertLessEqual(graph_count, 2, "图谱条目不得超过 50% 占比")
         self.assertGreaterEqual(len(result["evidence"]), 2)
+
+
+class TicketFlowTests(unittest.TestCase):
+    """P1-7 补完：草稿不落库 → 用户确认后走独立接口 → 幂等。"""
+
+    def setUp(self) -> None:
+        clear_mock_tickets()
+
+    def _client(self):
+        settings = make_settings()
+        services = build_services(settings)
+        services.llm = FakeLLM()
+        return TestClient(create_app(settings, services=services))
+
+    def test_draft_surfaces_in_agent_state(self) -> None:
+        """图执行完后草稿进入 state.tool_drafts，done 事件据此下发给前端。"""
+        settings = make_settings()
+        services = build_services(settings)
+        services.llm = TicketOnlyLLM()
+        spec, entry = build_graph(settings)
+        state = asyncio.run(
+            WorkflowEngine(spec, entry, services, settings).run(
+                AgentState(query="宿舍晚上几点熄灯？", user_id=1)
+            )
+        )
+        self.assertTrue(state.tool_only)
+        self.assertEqual(len(state.tool_drafts), 1)
+        self.assertEqual(state.tool_drafts[0]["status"], "draft")
+        self.assertNotIn("ticket_no", state.tool_drafts[0])
+
+    def test_draft_endpoint_creates_ticket_idempotently(self) -> None:
+        client = self._client()
+        payload = {
+            "title": "宿舍噪音投诉",
+            "description": "402 夜间噪音较大",
+            "category": "宿舍",
+        }
+        first = client.post("/api/v1/tickets", json=payload)
+        second = client.post("/api/v1/tickets", json=payload)
+        self.assertEqual(first.status_code, 201, first.text)
+        self.assertRegex(first.json()["ticket_no"], r"^T\d{8}[A-Z0-9]+$")
+        self.assertEqual(first.json()["reused"], False)
+        self.assertEqual(second.json()["ticket_no"], first.json()["ticket_no"])
+        self.assertTrue(second.json()["reused"], "窗口内重复提交应复用同一工单")
+
+    def test_ticket_endpoint_requires_login(self) -> None:
+        settings = Settings(llm_mode="fake", vector_mode="mock", graph_mode="mock")
+        services = build_services(settings)
+        client = TestClient(create_app(settings, services=services))
+        response = client.post(
+            "/api/v1/tickets",
+            json={"title": "t", "description": "d", "category": "宿舍"},
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_draft_not_written_until_confirmed(self) -> None:
+        """无明确意图时只出草稿，不落库；确认后才生成工单。"""
+        settings, services = build_services_for_test()
+        runner = ToolRunner(services, settings)
+        draft = asyncio.run(
+            runner.run(
+                "create_ticket",
+                {"title": "宿舍噪音", "description": "402 夜间较吵", "category": "宿舍"},
+                user_id=901,
+                conversation_id=None,
+                run_id="draft-run",
+                query="宿舍晚上几点熄灯？",
+            )
+        )
+        self.assertEqual(draft.payload["status"], "draft")
+        self.assertNotIn("ticket_no", draft.payload)
+        self.assertEqual(draft.payload["title"], "宿舍噪音")
+
+        # 走确认接口后才产生工单号
+        settings2 = make_settings()
+        client = TestClient(create_app(settings2, services=build_services(settings2)))
+        confirmed = client.post(
+            "/api/v1/tickets",
+            json={
+                "title": draft.payload["title"],
+                "description": draft.payload["description"],
+                "category": draft.payload["category"],
+            },
+        )
+        self.assertEqual(confirmed.status_code, 201, confirmed.text)
+        self.assertIn("ticket_no", confirmed.json())
 
 
 class CacheAndFeedbackTests(unittest.TestCase):

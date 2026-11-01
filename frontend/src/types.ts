@@ -45,6 +45,14 @@ export interface RuntimeInfo {
   latency_ms: number
 }
 
+export interface TicketDraft {
+  status: string
+  requires_confirmation: boolean
+  title: string
+  description: string
+  category: string
+}
+
 export interface ChatDonePayload {
   answer: string
   sources: SourceItem[]
@@ -55,6 +63,7 @@ export interface ChatDonePayload {
   grounding_reason?: string
   conversation_id: number | null
   message_id?: number | null
+  tool_drafts?: TicketDraft[]
   intent: string
   retrieval_round: number
   regen_count: number
@@ -75,6 +84,10 @@ export interface Message {
   runtime?: RuntimeInfo
   pending?: boolean
   error?: string
+  /** 待确认的工单草稿 */
+  toolDrafts?: TicketDraft[]
+  /** 确认后拿到的工单号 */
+  ticketNo?: string
 }
 
 export interface ConversationItem {

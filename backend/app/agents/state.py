@@ -37,6 +37,8 @@ class AgentState(BaseModel):
     tool_evidence: list[Evidence] = Field(default_factory=list)
     tool_search_used: bool = False
     tool_only: bool = False
+    # 待用户确认的工单草稿（tool 未直接落库时返回，前端据此渲染确认按钮）
+    tool_drafts: list[dict[str, Any]] = Field(default_factory=list)
 
     # ---- 查询理解 ----
     intent: str = ""

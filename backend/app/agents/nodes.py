@@ -283,10 +283,25 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     if not results:
         return {"run_id": run_id, "tool_calls": []}
 
+    # 未落库的工单草稿：前端据此渲染"确认提交"按钮。
+    # 按内容去重：模型在 ReAct 第二轮可能重复调同一个工具，不去重会出两张一样的草稿。
+    drafts: list[dict[str, Any]] = []
+    seen_drafts: set[tuple[Any, ...]] = set()
+    for result in results:
+        payload = result.payload
+        if not payload.get("requires_confirmation"):
+            continue
+        key = (payload.get("title"), payload.get("description"), payload.get("category"))
+        if key in seen_drafts:
+            continue
+        seen_drafts.add(key)
+        drafts.append(payload)
+
     update: dict[str, Any] = {
         "run_id": run_id,
         "tool_calls": call_records,
         "tool_evidence": tool_evidence,
+        "tool_drafts": drafts,
     }
     search_used = any(result.name == "search_rules" for result in results)
     if search_used:

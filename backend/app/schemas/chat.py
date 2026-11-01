@@ -52,4 +52,7 @@ class ChatResponse(BaseModel):
     grounding_reason: str = ""
     conversation_id: int | None = None
     message_id: int | None = Field(default=None, description="助手消息 id，前端点赞点踩可直接用")
+    tool_drafts: list[dict[str, Any]] = Field(
+        default_factory=list, description="待确认的工单草稿（前端渲染确认按钮）"
+    )
     runtime: dict[str, Any] = Field(default_factory=dict, description="图引擎运行信息（步数/节点/循环次数）")
