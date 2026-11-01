@@ -20,6 +20,10 @@
           <el-icon><Clock /></el-icon>
           <span>会话历史</span>
         </el-menu-item>
+        <el-menu-item index="/notices">
+          <el-icon><Bell /></el-icon>
+          <span>校园公告</span>
+        </el-menu-item>
         <el-menu-item index="/documents">
           <el-icon><Document /></el-icon>
           <span>文档管理</span>
@@ -75,7 +79,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChatDotRound, Clock, Document, InfoFilled } from '@element-plus/icons-vue'
+import { Bell, ChatDotRound, Clock, Document, InfoFilled } from '@element-plus/icons-vue'
 import { fetchHealth } from './api/client'
 import { useAuthStore } from './stores/auth'
 import type { HealthInfo } from './types'

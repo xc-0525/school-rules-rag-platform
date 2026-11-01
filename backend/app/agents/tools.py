@@ -232,82 +232,23 @@ class ToolRunner:
             payload={"announcements": announcements},
         )
 
-    async def _announcements_from_db(
-        self, keyword: str, limit: int
-    ) -> list[dict[str, Any]]:
-        if not self.settings.mysql_url:
-            return self._demo_announcements(keyword, limit)
+    async def _announcements_from_db(self, keyword: str, limit: int) -> list[dict[str, Any]]:
+        """查询已发布且未过期的公告。
+
+        统一走 services/notices 的过滤逻辑（含有效期），与页面同源——
+        避免"页面上已经下架的公告，问答还能答出来"。
+        """
+        from app.services import notices as notice_service
+
         try:
-            import asyncio
-
             return await asyncio.to_thread(
-                self._announcements_sync, keyword, limit
-            )
-        except Exception:  # noqa: BLE001 —— 表未初始化时退回演示数据
-            logger.exception("query_announcements failed, fallback to demo data")
-            return self._demo_announcements(keyword, limit)
-
-    def _announcements_sync(self, keyword: str, limit: int) -> list[dict[str, Any]]:
-        from sqlalchemy import or_, select
-
-        from app.db.models import Announcement
-        from app.db.session import new_session
-
-        with new_session(self.settings.mysql_url) as session:
-            query = select(Announcement).where(Announcement.status == "published")
-            if keyword:
-                like = f"%{keyword}%"
-                query = query.where(
-                    or_(Announcement.title.like(like), Announcement.content.like(like))
+                lambda: notice_service.list_notices(
+                    self.settings, keyword=keyword, limit=limit
                 )
-            rows = (
-                session.execute(
-                    query.order_by(Announcement.is_pinned.desc(), Announcement.id.desc()).limit(limit)
-                )
-                .scalars()
-                .all()
             )
-            return [
-                {
-                    "id": row.id,
-                    "title": row.title,
-                    "content": row.content,
-                    "created_at": row.created_at.strftime("%Y-%m-%d") if row.created_at else "",
-                }
-                for row in rows
-            ]
-
-    @staticmethod
-    def _demo_announcements(keyword: str, limit: int) -> list[dict[str, Any]]:
-        """Mock/MySQL 未初始化时的兜底公告（与 SQL 种子一致）。"""
-        items = [
-            {
-                "id": 1,
-                "title": "关于图书馆延长开放时间的通知",
-                "content": (
-                    "为方便同学复习，自本周起图书馆周一至周五开放时间延长至 22:30，"
-                    "周六周日 09:00-21:30，考试周另行通知。"
-                ),
-                "created_at": "2026-10-31",
-                "is_pinned": 1,
-            },
-            {
-                "id": 2,
-                "title": "校园卡服务中心迁址公告",
-                "content": (
-                    "校园卡服务中心自本周起迁至行政楼一层 105 室，办理挂失、补卡、充值业务，"
-                    "服务时间 08:30-17:30。"
-                ),
-                "created_at": "2026-10-31",
-                "is_pinned": 0,
-            },
-        ]
-        matched = [
-            item
-            for item in items
-            if not keyword or keyword in item["title"] or keyword in item["content"]
-        ]
-        return matched[:limit]
+        except Exception:  # noqa: BLE001 —— 表未初始化时不影响问答主流程
+            logger.exception("query_announcements failed")
+            return []
 
     async def _create_ticket(
         self, arguments: dict[str, Any], user_id: int, query: str = ""

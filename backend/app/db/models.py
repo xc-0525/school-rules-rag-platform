@@ -116,6 +116,10 @@ class Announcement(Base):
     content: Mapped[str] = mapped_column(Text)
     is_pinned: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="draft")
+    # 公告模块新增：分类与有效期（见 sql/migrations/002_notice_fields.sql）
+    category: Mapped[str] = mapped_column(String(32), default="other")
+    effective_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

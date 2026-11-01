@@ -24,6 +24,12 @@ const router = createRouter({
       meta: { title: '会话历史' },
     },
     {
+      path: '/notices',
+      name: 'notices',
+      component: () => import('../views/NoticesView.vue'),
+      meta: { title: '校园公告' },
+    },
+    {
       path: '/documents',
       name: 'documents',
       component: () => import('../views/DocumentsView.vue'),

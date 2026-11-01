@@ -42,8 +42,16 @@ def _append_merge(
     结论：图谱在当前语料下只有"补充召回"价值，不具备"排序"价值，
     因此不参与排序竞争，只保证正确条款进入候选集。
     """
-    merged = list(tool_evidence) + list(vector_hits)
-    seen = {_evidence_key(item) for item in merged}
+    # 工具可能被 LLM 连续调用多次（ReAct 两轮），同一公告会重复出现；
+    # 这里按正文去重，避免同一条依据在 sources 里列两遍。
+    merged: list[Evidence] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in list(tool_evidence) + list(vector_hits):
+        key = _evidence_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
     cap = max(1, int((len(merged) + len(graph_items)) * share + 0.999)) if share > 0 else 10**6
     added = 0
     for item in graph_items:

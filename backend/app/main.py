@@ -21,6 +21,7 @@ from app.api.v1.auth import build_router as build_auth_router
 from app.api.v1.chat import build_router
 from app.api.v1.conversations import build_router as build_conversations_router
 from app.api.v1.documents import build_router as build_documents_router
+from app.api.v1.notices import build_router as build_notices_router
 from app.api.v1.tickets import build_router as build_tickets_router
 from app.core.config import BASE_DIR, Settings
 from app.core.executors import shutdown_ingest_pool
@@ -150,6 +151,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(build_conversations_router(services, settings))
     app.include_router(build_documents_router(services, settings))
     app.include_router(build_tickets_router(settings))
+    app.include_router(build_notices_router(settings))
 
     # 单端口演示：SERVE_FRONTEND=1 且 frontend/dist 存在时，后端直接托管前端
     frontend_dist = BASE_DIR.parent / "frontend" / "dist"

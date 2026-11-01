@@ -4,6 +4,8 @@ import type {
   DocumentItem,
   HealthInfo,
   LoginResponse,
+  NoticeCategoryOption,
+  NoticeItem,
   UploadResult,
   UserInfo,
 } from '../types'
@@ -39,6 +41,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       /* ignore */
     }
     throw new Error(message)
+  }
+  // 204 没有响应体（删除类接口），直接返回，避免 json() 解析空串报错
+  if (response.status === 204) {
+    return undefined as T
   }
   return (await response.json()) as T
 }
@@ -104,6 +110,48 @@ export function confirmTicket(payload: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
+}
+
+// ---------------- 校园公告 ----------------
+export interface NoticeQuery {
+  category?: string
+  keyword?: string
+  include_expired?: boolean
+  limit?: number
+}
+
+export function fetchNotices(query: NoticeQuery = {}): Promise<NoticeItem[]> {
+  const params = new URLSearchParams()
+  if (query.category) params.set('category', query.category)
+  if (query.keyword) params.set('keyword', query.keyword)
+  if (query.include_expired) params.set('include_expired', 'true')
+  if (query.limit) params.set('limit', String(query.limit))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return request<NoticeItem[]>(`/api/v1/notices${suffix}`)
+}
+
+export function fetchNoticeCategories(): Promise<NoticeCategoryOption[]> {
+  return request<NoticeCategoryOption[]>('/api/v1/notices/meta/categories')
+}
+
+export function createNotice(payload: Record<string, unknown>): Promise<NoticeItem> {
+  return request<NoticeItem>('/api/v1/notices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateNotice(id: number, payload: Record<string, unknown>): Promise<NoticeItem> {
+  return request<NoticeItem>(`/api/v1/notices/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteNotice(id: number): Promise<void> {
+  return request<void>(`/api/v1/notices/${id}`, { method: 'DELETE' })
 }
 
 // ---------------- 文档 ----------------

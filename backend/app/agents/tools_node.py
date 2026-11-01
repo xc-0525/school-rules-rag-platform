@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
 from app.agents.prompting import _history_messages, _prompt_question
 from app.agents.prompts import SYSTEM_PROMPT, TOOL_SYSTEM_PROMPT
+from app.agents.fusion import _evidence_key
 from app.agents.runtime import NodeContext
 from app.agents.state import AgentState
 from app.agents.tools import TOOL_DEFINITIONS, ToolRunner
@@ -195,12 +197,31 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     async for piece in ctx.services.llm.stream(answer_messages):
         pieces.append(piece)
         await ctx.delta(piece)
-    await ctx.emit("meta", {"sources": [source.model_dump() for source in sources], "cached": False})
+    # 工具可能被 LLM 连续调用多次（ReAct 两轮），同一公告会被重复收录。
+    # tool-only 分支不经过 fuse_evidence，去重必须在这里做。
+    unique_evidence: list[Evidence] = []
+    unique_sources: list[SourceItem] = []
+    seen_evidence: set[tuple[str, str, str]] = set()
+    seen_sources: set[tuple[str, str, str]] = set()
+    for item in evidence:
+        key = _evidence_key(item)
+        if key not in seen_evidence:
+            seen_evidence.add(key)
+            unique_evidence.append(item)
+    for source in sources:
+        key = (source.type, re.sub(r"\s+", "", source.snippet or "")[:120], "")
+        if key not in seen_sources:
+            seen_sources.add(key)
+            unique_sources.append(source)
+
+    await ctx.emit(
+        "meta", {"sources": [source.model_dump() for source in unique_sources], "cached": False}
+    )
     return {
         **update,
         "tool_only": True,
-        "sources": sources,
-        "evidence": evidence,
+        "sources": unique_sources,
+        "evidence": unique_evidence,
         "evidence_score": 0.9,
         "answer": "".join(pieces),
         # P0-4：工具直答没有走引用校验，必须标 skipped 而不是伪造成 verified

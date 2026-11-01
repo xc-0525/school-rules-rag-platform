@@ -96,6 +96,27 @@ export interface Message {
   ticketNo?: string
 }
 
+export interface NoticeItem {
+  id: number
+  title: string
+  content: string
+  category: string
+  category_label: string
+  is_pinned: boolean
+  status: string
+  publisher: string
+  effective_at: string | null
+  expires_at: string | null
+  created_at: string | null
+  updated_at: string | null
+  is_expired: boolean
+}
+
+export interface NoticeCategoryOption {
+  code: string
+  label: string
+}
+
 export interface ConversationItem {
   id: number
   title: string
