@@ -104,11 +104,13 @@ async function send() {
       onDelta: (text) => {
         store.appendDelta(assistantIndex, text)
       },
+      onReset: () => {
+        store.resetMessage(assistantIndex)
+      },
       onDone: (payload) => {
         store.finishMessage(assistantIndex, payload)
         if (payload.conversation_id) {
           store.conversationId = payload.conversation_id
-          store.syncMessageIds()
         }
         scrollToBottom()
       },

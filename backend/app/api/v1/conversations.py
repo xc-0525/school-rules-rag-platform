@@ -14,7 +14,6 @@ from app.schemas.conversation import (
     FeedbackResponse,
 )
 from app.services.auth import AuthUser, build_current_user_dependency
-from app.services.persistence import DEMO_USER_ID
 
 
 def build_router(services: Any, settings: Settings) -> APIRouter:
@@ -22,8 +21,9 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
     persistence = services.persistence
     current_user = build_current_user_dependency(settings)
 
-    def user_id_of(user: AuthUser | None) -> int:
-        return user.id if user else DEMO_USER_ID
+    def user_id_of(user: AuthUser) -> int:
+        # 不再回落到 DEMO_USER_ID（=1，管理员）：匿名用户有自己的账号
+        return user.id
 
     @router.get(
         "/conversations",
@@ -31,7 +31,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         summary="会话列表（按更新时间倒序，仅当前用户）",
     )
     async def list_conversations(
-        limit: int = 20, user: AuthUser | None = Depends(current_user)
+        limit: int = 20, user: AuthUser = Depends(current_user)
     ):
         limit = max(1, min(limit, 100))
         return await persistence.list_conversations(user_id_of(user), limit)
@@ -42,7 +42,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         summary="会话详情（含完整消息与来源引用）",
     )
     async def get_conversation(
-        conversation_id: int, user: AuthUser | None = Depends(current_user)
+        conversation_id: int, user: AuthUser = Depends(current_user)
     ):
         data = await persistence.get_conversation(conversation_id, user_id_of(user))
         if data is None:
@@ -57,7 +57,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
     async def submit_feedback(
         message_id: int,
         body: FeedbackRequest,
-        user: AuthUser | None = Depends(current_user),
+        user: AuthUser = Depends(current_user),
     ):
         data = await persistence.add_feedback(
             message_id, user_id_of(user), body.rating, body.comment

@@ -62,7 +62,12 @@ class MySQLPersistenceTests(unittest.TestCase):
     """真实 MySQL 的端到端测试：问答 → 落库 → 历史 → 反馈。"""
 
     def setUp(self) -> None:
-        self.settings = Settings(llm_mode="fake", mysql_url=MYSQL_URL)
+        self.settings = Settings(
+            llm_mode="fake",
+            mysql_url=MYSQL_URL,
+            auth_required=False,
+            dev_mode=True,
+        )
         services = build_services(self.settings)
         services.llm = FakeLLM()
         self.app = create_app(self.settings, services=services)

@@ -21,7 +21,14 @@ from app.services.llm import DEFAULT_FAKE_ANSWER, FakeLLM  # noqa: E402
 
 
 def make_settings() -> Settings:
-    return Settings(llm_mode="fake", vector_mode="mock", graph_mode="mock")
+    # 测试默认走 dev_mode：匿名身份是独立的 anonymous 账号，不会落到 user_id=1
+    return Settings(
+        llm_mode="fake",
+        vector_mode="mock",
+        graph_mode="mock",
+        auth_required=False,
+        dev_mode=True,
+    )
 
 
 def build_services_for_test():
@@ -107,11 +114,30 @@ class ToolRunnerTests(unittest.TestCase):
                 user_id=1,
                 conversation_id=None,
                 run_id="test-run",
+                query="我要投诉宿舍噪音，帮我转人工",
             )
         )
         self.assertTrue(result.success)
         self.assertRegex(result.payload["ticket_no"], r"^T\d{8}[A-Z0-9]+$")
         self.assertIn("工单", result.summary)
+
+    def test_create_ticket_requires_intent(self) -> None:
+        """P1-7：用户没表达投诉/报修意图时只生成草稿，不落库。"""
+        settings, services = build_services_for_test()
+        runner = ToolRunner(services, settings)
+        result = asyncio.run(
+            runner.run(
+                "create_ticket",
+                {"title": "宿舍噪音", "description": "402 夜间较吵", "category": "宿舍"},
+                user_id=1,
+                conversation_id=None,
+                run_id="test-run-draft",
+                query="宿舍晚上几点熄灯？",
+            )
+        )
+        self.assertEqual(result.payload.get("status"), "draft")
+        self.assertNotIn("ticket_no", result.payload)
+        self.assertIn("草稿", result.summary)
 
 
 class ToolCallingGraphTests(unittest.TestCase):

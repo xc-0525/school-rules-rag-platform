@@ -52,13 +52,28 @@ def build_graph(settings: Settings) -> tuple[dict[str, NodeSpec], str]:
             f"已重试 {state.retrieval_round} 轮仍无充分证据，拒答并引导人工",
         )
 
+    def route_expand(state) -> tuple[str | None, str]:
+        """查询扩展后的分支：扩不出词就直接拒答，不再空跑一轮召回。"""
+        if state.expansion_exhausted or not state.expansion_terms:
+            return (
+                "reject_handoff",
+                "查询扩展没有可新增的检索词，直接拒答（避免同 query 空转重试）",
+            )
+        return (
+            "parallel_retrieval",
+            f"已扩展检索词（第 {state.retrieval_round} 轮）：{'、'.join(state.expansion_terms)}",
+        )
+
     def route_grounding(state) -> tuple[str | None, str]:
-        if state.grounding_ok:
-            return "persist_answer", "答案引用校验通过"
+        # 三态：skipped 表示工具直答未参与校验，直接落库；只有 unverified 才重生成
+        if state.grounding_status == "verified":
+            return "persist_answer", f"答案引用校验通过（{state.grounding_reason}）"
+        if state.grounding_status == "skipped":
+            return "persist_answer", f"未参与引用校验：{state.grounding_reason}"
         if state.regen_count <= settings.max_regen:
             return (
                 "generate_answer",
-                f"引用校验未通过，重新生成（第 {state.regen_count} 次）",
+                f"引用校验未通过（{state.grounding_reason}），重新生成（第 {state.regen_count} 次）",
             )
         return "degrade_answer", f"引用校验连续未通过（{state.regen_count} 次），降级回答"
 
@@ -134,10 +149,10 @@ def build_graph(settings: Settings) -> tuple[dict[str, NodeSpec], str]:
         "expand_query": NodeSpec(
             name="expand_query",
             label="查询扩展 Agent",
-            description="用同义词 / 实体扩展查询后重新召回（循环体）",
+            description="用实体同义词扩展检索词后重新召回；扩不出词则直接拒答（循环体）",
             control="loop",
             run=nodes.expand_query,
-            next="parallel_retrieval",
+            route=route_expand,
         ),
         "generate_answer": NodeSpec(
             name="generate_answer",

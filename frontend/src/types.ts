@@ -51,7 +51,10 @@ export interface ChatDonePayload {
   refused: boolean
   degraded: boolean
   cached: boolean
+  grounding_status?: 'verified' | 'unverified' | 'skipped'
+  grounding_reason?: string
   conversation_id: number | null
+  message_id?: number | null
   intent: string
   retrieval_round: number
   regen_count: number

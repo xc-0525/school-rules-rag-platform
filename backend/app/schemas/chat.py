@@ -45,5 +45,11 @@ class ChatResponse(BaseModel):
     refused: bool = False
     degraded: bool = False
     cached: bool = False
+    grounding_status: str = Field(
+        default="unverified",
+        description="引用校验状态：verified=通过；unverified=未通过；skipped=工具直答未参与校验",
+    )
+    grounding_reason: str = ""
     conversation_id: int | None = None
+    message_id: int | None = Field(default=None, description="助手消息 id，前端点赞点踩可直接用")
     runtime: dict[str, Any] = Field(default_factory=dict, description="图引擎运行信息（步数/节点/循环次数）")

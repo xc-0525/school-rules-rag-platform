@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 
 from app.core.config import BASE_DIR, Settings
+from app.core.executors import run_in_ingest_pool
 from app.db.session import new_session
 from app.schemas.document import (
     ChunkPreview,
@@ -131,9 +132,18 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["文档"])
     current_user = build_current_user_dependency(settings)
 
-    def ensure_admin(user: AuthUser | None) -> None:
-        """AUTH_REQUIRED=1 时，上传/删除文档仅管理员可操作。"""
-        if settings.auth_required and (user is None or not user.is_admin):
+    def ensure_admin(user: AuthUser) -> None:
+        """上传/删除文档仅管理员可操作。
+
+        P0-1 修复：旧实现写作 `if settings.auth_required and (...)`，
+        在 AUTH_REQUIRED=0（手动 uvicorn 启动）时会直接放行，等于把知识库
+        的写权限开放给任何人。现在与鉴权开关解耦：只要不是显式的 DEV_MODE，
+        就必须是 admin。
+        """
+        if settings.dev_mode:
+            # 本地/测试模式：允许匿名联调，但身份记为 anonymous（不再写 user_id=1）
+            return
+        if not user.is_admin:
             raise HTTPException(status_code=403, detail="仅管理员可管理校规文档")
 
     def require_mysql() -> None:
@@ -153,6 +163,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         filename: str,
         title: str | None,
         replace: bool,
+        uploader: AuthUser,
     ) -> DocumentUploadResponse:
         """上传公共逻辑：保存 → 解析 → 三库入库。"""
         safe_name = Path(filename or "upload").name
@@ -173,7 +184,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         # 先做依赖预检（Qdrant / BGE / Neo4j），避免写了一半才发现依赖不可用
         ingestor = RulesIngestor(settings, vector_store=services.vector)
         try:
-            await asyncio.to_thread(ingestor.preflight)
+            await run_in_ingest_pool(ingestor.preflight)
         except GraphUnavailableError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
@@ -191,7 +202,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
                     document = parse_pdf_bytes(raw, filename=safe_name, title=title)
                 except PDFTextError:
                     # 文字层为空 → 自动尝试 OCR（装了引擎才会成功）
-                    document = await asyncio.to_thread(
+                    document = await run_in_ingest_pool(
                         ocr_pdf_bytes, raw, safe_name, title
                     )
             else:
@@ -220,7 +231,9 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         document.file_path = str(target)
 
         try:
-            result = await asyncio.to_thread(ingestor.ingest_parsed, document, replace)
+            result = await run_in_ingest_pool(
+                ingestor.ingest_parsed, document, replace, uploader.id
+            )
         except GraphUnavailableError as exc:
             target.unlink(missing_ok=True)
             raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -251,7 +264,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         summary="上传文档并入库（JSON：文本或 PDF base64）",
     )
     async def upload_document(
-        payload: UploadTextRequest, user: AuthUser | None = Depends(current_user)
+        payload: UploadTextRequest, user: AuthUser = Depends(current_user)
     ):
         ensure_admin(user)
         safe_name = Path(payload.filename or "").name
@@ -266,12 +279,12 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
                 raw = base64.b64decode("".join(payload.content_base64.split()), validate=True)
             except Exception as exc:  # noqa: BLE001
                 raise HTTPException(status_code=400, detail="content_base64 不是合法的 base64") from exc
-            return await _ingest_upload(raw, safe_name, payload.title, payload.replace)
+            return await _ingest_upload(raw, safe_name, payload.title, payload.replace, user)
 
         if not payload.content:
             raise HTTPException(status_code=400, detail=".md/.txt 需通过 content 传文本内容")
         return await _ingest_upload(
-            payload.content.encode("utf-8"), safe_name, payload.title, payload.replace
+            payload.content.encode("utf-8"), safe_name, payload.title, payload.replace, user
         )
 
     # ---------------- multipart 上传（装了 python-multipart 后才出现） ----------------
@@ -286,17 +299,17 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
             file: UploadFile = File(..., description=".md / .txt / 文字版 .pdf"),
             title: str | None = Form(default=None),
             replace: bool = Form(default=True),
-            user: AuthUser | None = Depends(current_user),
+            user: AuthUser = Depends(current_user),
         ):
             ensure_admin(user)
             raw = await file.read()
             return await _ingest_upload(
-                raw, Path(file.filename or "upload").name, title, replace
+                raw, Path(file.filename or "upload").name, title, replace, user
             )
 
     # ---------------- 列表 / 详情 / 删除 ----------------
     @router.get("/documents", response_model=list[DocumentItem], summary="文档列表")
-    async def list_documents(user: AuthUser | None = Depends(current_user)):
+    async def list_documents(user: AuthUser = Depends(current_user)):
         require_mysql()
         return await asyncio.to_thread(_list_documents_sync, settings.mysql_url)
 
@@ -305,7 +318,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         response_model=DocumentDetail,
         summary="文档详情（含分块预览）",
     )
-    async def get_document(document_id: int, user: AuthUser | None = Depends(current_user)):
+    async def get_document(document_id: int, user: AuthUser = Depends(current_user)):
         require_mysql()
         data = await asyncio.to_thread(_get_document_sync, settings.mysql_url, document_id)
         if data is None:
@@ -318,7 +331,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         summary="删除文档（同时清理 Qdrant 向量与 Neo4j 图谱）",
     )
     async def delete_document(
-        document_id: int, user: AuthUser | None = Depends(current_user)
+        document_id: int, user: AuthUser = Depends(current_user)
     ):
         ensure_admin(user)
         require_real_ingestion()
@@ -327,7 +340,7 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
             raise HTTPException(status_code=404, detail="文档不存在")
 
         ingestor = RulesIngestor(settings, vector_store=services.vector)
-        deleted = await asyncio.to_thread(ingestor.delete_document, document_id)
+        deleted = await run_in_ingest_pool(ingestor.delete_document, document_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="文档不存在")
         _unlink_upload(data["file_path"])

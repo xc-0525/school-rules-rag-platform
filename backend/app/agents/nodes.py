@@ -4,6 +4,12 @@
 - 只返回要修改的状态字段，由图引擎合并；
 - 需要流式输出时通过 `ctx.delta()` 推送；
 - 选择/循环的控制逻辑放在 `graph.py` 的路由函数里，节点本身保持纯粹。
+
+本文件在审查整改中承担了四个 P0/P1 修复：
+P0-5  查询理解/扩展：拆分 generation_query 与 retrieval_query，扩展改为查同义词表；
+P0-4  引用校验：三态 grounding_status + 条款号必须落在召回集内；
+P1-3  证据融合：RRF 排序 + 分路可比的 evidence_score；
+P1-5  重新生成前推送 reset，避免前端把两版答案拼在一起。
 """
 
 from __future__ import annotations
@@ -18,7 +24,7 @@ from app.agents.runtime import NodeContext
 from app.agents.state import AgentState
 from app.agents.tools import TOOL_DEFINITIONS, ToolRunner
 from app.schemas.chat import Evidence, SourceItem
-from app.services import mock_data
+from app.services import lexicon
 
 logger = logging.getLogger("app.agents")
 
@@ -37,7 +43,8 @@ SYSTEM_PROMPT = (
 )
 STRICT_SYSTEM_PROMPT = (
     SYSTEM_PROMPT
-    + "\n5. 这是重新生成：上一版答案未通过引用校验，本轮必须逐条引用【背景资料】中的原文。"
+    + "\n5. 这是重新生成：上一版答案未通过引用校验，本轮必须逐条引用【背景资料】中的原文，"
+    "且条款号必须来自【背景资料】，不得出现资料中没有的条款编号。"
 )
 
 TOOL_SYSTEM_PROMPT = (
@@ -60,6 +67,16 @@ def _history_messages(state: AgentState, limit: int = 6) -> list[dict[str, str]]
     ]
 
 
+def _prompt_question(state: AgentState) -> str:
+    """给大模型看的问题：只认自然问句，绝不使用被同义词污染的检索串。"""
+    return state.generation_query or state.query
+
+
+def _search_text(state: AgentState) -> str:
+    """给检索用的串：优先使用扩展后的 retrieval_query。"""
+    return state.retrieval_query or state.generation_query or state.query
+
+
 def build_messages(state: AgentState, strict: bool = False) -> list[dict[str, str]]:
     """组装证据约束 Prompt（含多轮历史）。"""
     blocks = [
@@ -76,7 +93,7 @@ def build_messages(state: AgentState, strict: bool = False) -> list[dict[str, st
             "role": "user",
             "content": (
                 f"【背景资料】\n{context}\n\n"
-                f"【用户问题】\n{state.rewritten_query or state.query}\n\n"
+                f"【用户问题】\n{_prompt_question(state)}\n\n"
                 "请严格依据【背景资料】回答，并在末尾注明引用条款。"
             ),
         }
@@ -98,7 +115,7 @@ async def cache_lookup(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
 
     answer, sources = hit
     await ctx.emit("meta", {"sources": [source.model_dump() for source in sources], "cached": True})
-    await ctx.emit("delta", {"content": answer})
+    await ctx.delta(answer)
     return {"cached": True, "answer": answer, "sources": sources}
 
 
@@ -106,19 +123,17 @@ async def cache_lookup(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
 # ② 查询理解 Agent
 # ---------------------------------------------------------------------------
 async def query_understand(state: AgentState, ctx: NodeContext) -> dict[str, Any]:  # noqa: ARG001
-    intent = "其他"
-    entities: list[str] = []
-    for name, keywords in mock_data.INTENT_KEYWORDS.items():
-        matched = [keyword for keyword in keywords if keyword in state.query]
-        if matched:
-            intent = name
-            entities.extend(matched)
-    if not entities:
-        entities = [state.query]
+    """识别意图与实体，并初始化两条查询串。
+
+    - generation_query：给大模型看的自然问句（后续只可能被多轮改写覆盖）；
+    - retrieval_query ：给检索用的串（后续可能被 expand_query 追加同义词）。
+    """
+    intent, entities = lexicon.extract_intent(state.query)
     return {
         "intent": intent,
-        "entities": list(dict.fromkeys(entities)),
-        "rewritten_query": state.query,
+        "entities": entities,
+        "generation_query": state.generation_query or state.query,
+        "retrieval_query": state.retrieval_query or state.query,
     }
 
 
@@ -155,7 +170,8 @@ async def memory_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
             rewritten = await ctx.services.llm.rewrite_query(history, state.query)
         except Exception:  # noqa: BLE001
             logger.exception("追问改写失败，使用原始 query")
-    return {"history": history, "rewritten_query": rewritten}
+    # 改写结果同时作为生成与检索的起点；扩展只允许改 retrieval_query
+    return {"history": history, "generation_query": rewritten, "retrieval_query": rewritten}
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +184,7 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": TOOL_SYSTEM_PROMPT}]
     messages.extend(_history_messages(state, limit=6))
-    messages.append({"role": "user", "content": state.rewritten_query or state.query})
+    messages.append({"role": "user", "content": _prompt_question(state)})
 
     results = []
     search_evidence: list[Evidence] = []
@@ -231,6 +247,8 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
                 user_id=state.user_id,
                 conversation_id=state.conversation_id,
                 run_id=run_id,
+                # 工单类写操作要用"用户原话"判断意图，不能用检索扩展串
+                query=_prompt_question(state),
             )
             await ctx.emit(
                 "tool",
@@ -311,7 +329,7 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
             "role": "user",
             "content": (
                 f"【工具结果】\n{summaries}\n\n"
-                f"【用户问题】\n{state.query}\n\n"
+                f"【用户问题】\n{_prompt_question(state)}\n\n"
                 "请简洁回答，并说明这些信息来自哪个工具。"
             ),
         }
@@ -328,7 +346,9 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
         "evidence": evidence,
         "evidence_score": 0.9,
         "answer": "".join(pieces),
-        "grounding_ok": True,
+        # P0-4：工具直答没有走引用校验，必须标 skipped 而不是伪造成 verified
+        "grounding_status": "skipped",
+        "grounding_reason": "工具结果直答，未经过条款引用校验",
     }
 
 
@@ -336,29 +356,53 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
 # ③④ 并行召回：检索 Agent（Qdrant）/ 图谱 Agent（Neo4j）
 # ---------------------------------------------------------------------------
 async def retrieve_vector(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
-    hits = await ctx.services.vector.search(state.rewritten_query, top_k=3)
+    hits = await ctx.services.vector.search(_search_text(state), top_k=3)
     return {"vector_hits": hits}
 
 
 async def retrieve_graph(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
-    paths = await ctx.services.graph.search_paths(state.rewritten_query, top_k=2)
+    paths = await ctx.services.graph.search_paths(_search_text(state), top_k=2)
     return {"graph_paths": paths}
 
 
 # ---------------------------------------------------------------------------
 # ⑤ 证据融合 Agent
 # ---------------------------------------------------------------------------
-async def fuse_evidence(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
-    seen: set[tuple[str, str, str]] = set()
-    merged = []
-    for item in [*state.vector_hits, *state.graph_paths, *state.tool_evidence]:
-        key = (item.type, item.title, item.detail)
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(item)
-    merged.sort(key=lambda item: item.score, reverse=True)
+def _evidence_key(item: Evidence) -> tuple[str, str, str]:
+    return (item.type, item.title, item.detail)
 
+
+async def fuse_evidence(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
+    """RRF 融合排序 + 分路标定的证据分。
+
+    P1-3 修复：
+    - 旧实现按 `item.score` 直接排序，而图谱分是 `0.55 + 0.1*hits` 的硬编码，
+      必然高于向量 cosine，导致"只要图谱命中就判证据充分"；
+    - 现在排序用 RRF（只看排名，不看原始量纲），充分性判定仍用 0~1 的标定分，
+      避免把阈值语义改掉（RRF 原始分只有 0.03 量级，直接比 0.5 会导致全站拒答）。
+    """
+    lists = [state.vector_hits, state.graph_paths, state.tool_evidence]
+    k = max(1, int(ctx.settings.rrf_k))
+
+    rrf: dict[tuple[str, str, str], float] = {}
+    merged_map: dict[tuple[str, str, str], Evidence] = {}
+    for items in lists:
+        seen_in_list: set[tuple[str, str, str]] = set()
+        for rank, item in enumerate(items, start=1):
+            key = _evidence_key(item)
+            if key in seen_in_list:  # 同一路里的重复不计分
+                continue
+            seen_in_list.add(key)
+            rrf[key] = rrf.get(key, 0.0) + 1.0 / (k + rank)
+            current = merged_map.get(key)
+            if current is None or item.score > current.score:
+                merged_map[key] = item
+
+    merged = sorted(
+        merged_map.values(),
+        key=lambda item: (rrf.get(_evidence_key(item), 0.0), item.score),
+        reverse=True,
+    )
     sources = [
         SourceItem(
             type=item.type,
@@ -369,41 +413,77 @@ async def fuse_evidence(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
         for item in merged
     ]
     score = max((item.score for item in merged), default=0.0)
-    await ctx.emit("meta", {"sources": [source.model_dump() for source in sources], "cached": False})
-    return {"evidence": merged, "evidence_score": score, "sources": sources}
+    meta = {
+        "rrf_k": k,
+        "rrf_top": round(max(rrf.values(), default=0.0), 4),
+        "vector_max": round(max((item.score for item in state.vector_hits), default=0.0), 3),
+        "graph_max": round(max((item.score for item in state.graph_paths), default=0.0), 3),
+        "graph_count": len(state.graph_paths),
+        "tool_count": len(state.tool_evidence),
+    }
+    await ctx.emit(
+        "meta",
+        {"sources": [source.model_dump() for source in sources], "cached": False, "fusion": meta},
+    )
+    return {
+        "evidence": merged,
+        "evidence_score": score,
+        "evidence_meta": meta,
+        "sources": sources,
+    }
 
 
 # ---------------------------------------------------------------------------
 # ⑥ 充分性判定（选择结构：充分 / 扩展重试 / 拒答）
 # ---------------------------------------------------------------------------
 async def check_sufficiency(state: AgentState, ctx: NodeContext) -> dict[str, Any]:  # noqa: ARG001
-    # 评分在融合节点算好；这里保持为一个显式节点，便于前端展示"判定"步骤
+    # 判定逻辑本身在 graph.route_sufficiency 里；保留节点是为了在 SSE 轨迹上
+    # 显式展示"判定"这一步（论文里可写：路由决策在 route 函数，节点用于轨迹标记）。
     return {}
 
 
 # ---------------------------------------------------------------------------
 # ⑦ 查询扩展（循环结构：回到并行召回）
 # ---------------------------------------------------------------------------
-async def expand_query(state: AgentState, ctx: NodeContext) -> dict[str, Any]:  # noqa: ARG001
-    round_no = state.retrieval_round + 1
-    extras: list[str] = []
-    for phrase, synonyms in mock_data.EXPANSIONS.items():
-        if phrase in state.rewritten_query:
-            extras.extend(synonyms)
-    if not extras:
-        extras = [entity for entity in state.entities if entity not in state.rewritten_query][:3]
+async def expand_query(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
+    """用实体同义词 / 口语说法扩展检索串。
 
-    query = state.rewritten_query
-    for extra in dict.fromkeys(extras):
-        if extra not in query:
-            query = f"{query} {extra}"
-    return {"rewritten_query": query, "retrieval_round": round_no}
+    与旧实现的关键差异：旧代码从 entities 里反向过滤（`entity not in query`），
+    而 entities 按构造必然是 query 的子串，于是兜底恒为空、整个循环空转。
+    现在改为主动查同义词表，扩不出词时置 `expansion_exhausted=True`，
+    由路由直接拒答，不再白跑一轮 Qdrant + Neo4j。
+    """
+    round_no = state.retrieval_round + 1
+    base = _search_text(state)
+    limit = max(1, int(getattr(ctx.settings, "query_expansion_max_terms", 3)))
+    expanded, terms = lexicon.expand_query(base, state.entities, limit=limit)
+    if not terms:
+        return {
+            "retrieval_round": round_no,
+            "expansion_terms": [],
+            "expansion_exhausted": True,
+        }
+    return {
+        "retrieval_query": expanded,
+        "expansion_terms": terms,
+        "expansion_exhausted": False,
+        "retrieval_round": round_no,
+    }
 
 
 # ---------------------------------------------------------------------------
 # ⑧ 生成 Agent（DeepSeek 流式，证据约束）
 # ---------------------------------------------------------------------------
 async def generate_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
+    # P1-5：重新生成前先清空前端已渲染的上一版草稿，否则两版答案会拼在一起
+    if state.regen_count > 0 and state.answer:
+        await ctx.emit(
+            "reset",
+            {
+                "reason": "上一版答案未通过引用校验，正在重新生成",
+                "regen_count": state.regen_count,
+            },
+        )
     messages = build_messages(state, strict=state.regen_count > 0)
     pieces: list[str] = []
     async for piece in ctx.services.llm.stream(messages):
@@ -419,32 +499,71 @@ ARTICLE_RE = re.compile(r"第[一二三四五六七八九十百零〇0-9]+条")
 GRAPH_TITLE_PREFIX = "知识图谱 · "
 
 
-async def verify_grounding(state: AgentState, ctx: NodeContext) -> dict[str, Any]:  # noqa: ARG001
-    """引用校验：答案需引用证据的文档名或条款号。
+def _clean_title(title: str) -> str:
+    title = (title or "").strip()
+    if title.startswith(GRAPH_TITLE_PREFIX):
+        title = title[len(GRAPH_TITLE_PREFIX):]
+    return title.strip()
 
-    注意：
-    - 图谱证据的标题带了"知识图谱 · "前缀，模型不会原样引用，匹配前要剥掉；
-    - 只看标题太弱，补充"条款号"匹配（如 第6条），降低误判为降级的概率。
+
+def _collect_evidence_citations(evidence: list[Evidence]) -> tuple[set[str], set[str]]:
+    """从召回证据里抽出可核对的两类标识：文档名、条款号。"""
+    titles: set[str] = set()
+    articles: set[str] = set()
+    for item in evidence:
+        title = _clean_title(item.title)
+        if title:
+            titles.add(title)
+        articles.update(ARTICLE_RE.findall(item.detail or ""))
+    if not articles:
+        # 详情里没有条款号时（工具证据/公告），退回从原文里抽，避免一律判失败
+        for item in evidence:
+            articles.update(ARTICLE_RE.findall(item.snippet or ""))
+    return titles, articles
+
+
+async def verify_grounding(state: AgentState, ctx: NodeContext) -> dict[str, Any]:  # noqa: ARG001
+    """引用校验（三态）。
+
+    判定规则（比旧版严格）：
+    1. 答案里出现的**每一个**条款号都必须能在召回证据里找到 —— 编造"第99条"直接不通过；
+    2. 至少要引用一个条款号或一个文档名 —— 通篇不带依据也不通过；
+    3. 答案长度下限 10 字。
+
+    仍然做不到"claim 级蕴含判断"（那需要 NLI 模型），但已经堵住最典型的两种
+    幻觉：编造条款号、完全不引用。论文里应如实描述为"引用可核对性校验"。
     """
     answer = state.answer or ""
-    titles: list[str] = []
-    article_numbers: list[str] = []
-    for item in state.evidence:
-        title = item.title or ""
-        if title.startswith(GRAPH_TITLE_PREFIX):
-            title = title[len(GRAPH_TITLE_PREFIX):]
-        if title:
-            titles.append(title)
-        match = ARTICLE_RE.search(item.detail or "")
-        if match:
-            article_numbers.append(match.group(0))
+    titles, articles = _collect_evidence_citations(state.evidence)
+    cited = set(ARTICLE_RE.findall(answer))
+    fabricated = sorted(cited - articles)
+    title_hit = any(title in answer for title in titles if title)
+    unsupported = sorted(cited) if not articles and cited else fabricated
 
-    cited_by_title = any(title in answer for title in titles)
-    cited_by_article = any(number in answer for number in article_numbers)
-    ok = (cited_by_title or cited_by_article) and len(answer) >= 10
-    if ok:
-        return {"grounding_ok": True}
-    return {"grounding_ok": False, "regen_count": state.regen_count + 1}
+    if len(answer.strip()) < 10:
+        return {
+            "grounding_status": "unverified",
+            "grounding_reason": "答案过短，无法核对引用",
+            "regen_count": state.regen_count + 1,
+        }
+    if unsupported:
+        return {
+            "grounding_status": "unverified",
+            "grounding_reason": "引用了未召回的条款：" + "、".join(unsupported[:3]),
+            "regen_count": state.regen_count + 1,
+        }
+    if not cited and not title_hit:
+        return {
+            "grounding_status": "unverified",
+            "grounding_reason": "未引用任何条款号或文档名",
+            "regen_count": state.regen_count + 1,
+        }
+    return {
+        "grounding_status": "verified",
+        "grounding_reason": (
+            f"引用条款 {len(cited)} 处，均在召回集内" if cited else "引用了召回的文档名"
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -462,15 +581,18 @@ async def degrade_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
 
 
 async def persist_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
-    conversation_id = await ctx.services.persistence.save_qa(state)
-    # 只缓存"有引用校验通过"的正常答案：拒答、降级、缓存命中的结果都不写缓存
+    receipt = await ctx.services.persistence.save_qa(state)
+    conversation_id = receipt.get("conversation_id") if isinstance(receipt, dict) else receipt
+    message_id = receipt.get("assistant_message_id") if isinstance(receipt, dict) else None
+    # 只缓存"通过引用校验"的正常答案：拒答、降级、缓存命中的结果都不写缓存；
+    # tool_only 的 grounding_status 是 skipped，天然被排除（P0-4）。
     if (
         not state.cached
         and not state.refused
         and not state.degraded
         and not state.tool_only
-        and state.grounding_ok
+        and state.grounding_status == "verified"
         and state.answer
     ):
         ctx.services.cache.store(state.query, state.answer, state.sources)
-    return {"conversation_id": conversation_id}
+    return {"conversation_id": conversation_id, "message_id": message_id}

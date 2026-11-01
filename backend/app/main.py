@@ -11,9 +11,9 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.agents.graph import build_graph
@@ -22,6 +22,9 @@ from app.api.v1.chat import build_router
 from app.api.v1.conversations import build_router as build_conversations_router
 from app.api.v1.documents import build_router as build_documents_router
 from app.core.config import BASE_DIR, Settings
+from app.core.executors import shutdown_ingest_pool
+from app.core.ratelimit import RateLimiter
+from app.services.auth import resolve_token
 from app.services.container import Services, build_services
 
 
@@ -37,13 +40,23 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     services = services or build_services(settings)
     nodes, entry = build_graph(settings)
     logger.info(
-        "create_app modes vector=%s graph=%s llm=%s auth=%s tools=%s",
+        "create_app modes vector=%s graph=%s llm=%s auth=%s dev_mode=%s tools=%s",
         settings.vector_mode,
         settings.graph_mode,
         settings.llm_mode,
         settings.auth_required,
+        settings.dev_mode,
         settings.max_tool_rounds,
     )
+    # 多 worker 部署前必须配置 AUTH_TOKEN_SECRET，否则各 worker 签名密钥不同，
+    # 会出现"登录成功但下一个请求 401"的随机故障。
+    if not settings.token_secret:
+        logger.warning(
+            "未配置 AUTH_TOKEN_SECRET：token 签名密钥为进程内随机值，"
+            "重启后全部失效，且无法多 worker 部署。"
+        )
+    if settings.dev_mode:
+        logger.warning("DEV_MODE=1：已放开匿名访问（匿名身份为独立的 anonymous 账号）")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -63,7 +76,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             app.state.vector_ready = True
         yield
 
-        # 应用退出：关闭复用的 Neo4j driver / Qdrant 本地客户端
+        # 应用退出：关闭复用的 Neo4j driver / Qdrant 本地客户端 / 入库线程池
         for service in (services.graph, services.vector):
             close = getattr(service, "close", None)
             if close is None:
@@ -72,6 +85,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                 close()
             except Exception:  # noqa: BLE001
                 pass
+        shutdown_ingest_pool()
 
     app = FastAPI(
         title=f"{settings.app_name} · v2",
@@ -87,6 +101,12 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.state.services = services
     app.state.nodes = nodes
     app.state.entry = entry
+    limiter = RateLimiter(
+        per_minute=settings.rate_limit_per_minute,
+        per_day=settings.rate_limit_per_day,
+        concurrent=settings.rate_limit_concurrent,
+    )
+    app.state.limiter = limiter
 
     # 前端（Vite dev server）联调用
     app.add_middleware(
@@ -97,8 +117,29 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def rate_limit_middleware(request: Request, call_next):
+        """P0-3：按用户（有 token）或 IP 做每分钟限流。
+
+        只拦 /api/ 前缀：/health、/ready、静态资源与前端页面不受影响，
+        否则探针被限流会误判服务不可用。
+        """
+        if not settings.rate_limit_enabled or not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        user = resolve_token(request.headers.get("authorization"))
+        client_host = request.client.host if request.client else "unknown"
+        key = f"u:{user.id}" if user else f"ip:{client_host}"
+        allowed, retry_after = limiter.hit(key)
+        if not allowed:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": f"请求过于频繁，请 {retry_after} 秒后重试"},
+                headers={"Retry-After": str(retry_after)},
+            )
+        return await call_next(request)
+
     app.include_router(build_auth_router(settings))
-    app.include_router(build_router(services, settings, nodes, entry))
+    app.include_router(build_router(services, settings, nodes, entry, limiter=limiter))
     app.include_router(build_conversations_router(services, settings))
     app.include_router(build_documents_router(services, settings))
 
@@ -121,7 +162,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                 "graph": settings.graph_mode,
                 "llm": settings.llm_mode,
                 "persistence": "mysql" if settings.mysql_url else "mock",
-                "auth": "required" if settings.auth_required else "optional",
+                "auth": "required" if settings.auth_required else "dev-anonymous",
+                "dev_mode": settings.dev_mode,
+                "token": "signed" if settings.token_secret else "ephemeral-secret",
+                "rate_limit": "on" if settings.rate_limit_enabled else "off",
                 "registration": "open" if settings.allow_registration else "closed",
             },
             "llm_configured": settings.llm_configured,

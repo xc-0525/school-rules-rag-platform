@@ -10,17 +10,29 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.schemas.chat import Evidence, SourceItem
 
 logger = logging.getLogger("app.tools")
+
+# 明确表达"要人工介入"的说法；命中才允许真正写工单
+TICKET_INTENT_KEYWORDS = (
+    "投诉", "报修", "工单", "转人工", "人工", "反馈", "举报", "建议",
+    "故障", "坏了", "噪音", "扰民", "太吵", "维修", "失物", "挂失",
+)
+
+
+def _has_ticket_intent(query: str) -> bool:
+    text = (query or "").strip()
+    return any(keyword in text for keyword in TICKET_INTENT_KEYWORDS)
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -110,6 +122,7 @@ class ToolRunner:
         user_id: int,
         conversation_id: int | None,
         run_id: str,
+        query: str = "",
     ) -> ToolResult:
         started = time.perf_counter()
         result: ToolResult
@@ -119,7 +132,7 @@ class ToolRunner:
             elif name == "query_announcements":
                 result = await self._query_announcements(arguments)
             elif name == "create_ticket":
-                result = await self._create_ticket(arguments, user_id)
+                result = await self._create_ticket(arguments, user_id, query)
             else:
                 result = ToolResult(
                     name=name,
@@ -137,11 +150,14 @@ class ToolRunner:
             )
 
         result.latency_ms = int((time.perf_counter() - started) * 1000)
-        self._log(
-            run_id=run_id,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            result=result,
+        # P1-6：写审计日志是同步 DB 调用，必须丢线程池，否则每次工具调用
+        # 都会阻塞事件循环几毫秒到几十毫秒（并发时被放大）。
+        await asyncio.to_thread(
+            self._log,
+            run_id,
+            conversation_id,
+            user_id,
+            result,
         )
         return result
 
@@ -293,10 +309,8 @@ class ToolRunner:
         return matched[:limit]
 
     async def _create_ticket(
-        self, arguments: dict[str, Any], user_id: int
+        self, arguments: dict[str, Any], user_id: int, query: str = ""
     ) -> ToolResult:
-        import asyncio
-
         title = str(arguments.get("title") or "").strip()
         description = str(arguments.get("description") or "").strip()
         category = str(arguments.get("category") or "").strip() or "其他"
@@ -304,6 +318,28 @@ class ToolRunner:
             raise ValueError("create_ticket 缺少 title 参数")
         if not description:
             raise ValueError("create_ticket 缺少 description 参数")
+
+        # P1-7：写操作必须有明确的用户意图，不能"聊到宿舍噪音就自动建单"
+        if getattr(self.settings, "ticket_require_intent", True) and not _has_ticket_intent(query):
+            draft = (
+                f"已整理工单草稿（尚未提交）：{title}\n分类：{category}\n"
+                "如确认需要人工跟进，请回复「确认提交工单」，系统会正式提交并返回工单号。"
+            )
+            return ToolResult(
+                name="create_ticket",
+                arguments={"title": title, "description": description, "category": category},
+                success=True,
+                summary=draft,
+                sources=[
+                    SourceItem(
+                        type="tool",
+                        title="工单草稿（未提交）",
+                        detail=f"分类：{category}",
+                        snippet=draft,
+                    )
+                ],
+                payload={"status": "draft", "requires_confirmation": True},
+            )
 
         if self.settings.mysql_url:
             ticket_no = await asyncio.to_thread(
@@ -343,7 +379,23 @@ class ToolRunner:
         from app.db.models import Ticket
         from app.db.session import new_session
 
+        window = int(getattr(self.settings, "ticket_idempotency_seconds", 600) or 0)
         with new_session(self.settings.mysql_url) as session:
+            if window > 0:
+                # 幂等：同一用户、同标题、同描述在窗口内复用已有工单，避免重复建单
+                existing = (
+                    session.query(Ticket)
+                    .filter(
+                        Ticket.user_id == (user_id or 1),
+                        Ticket.title == title[:200],
+                        Ticket.description == description,
+                        Ticket.created_at >= datetime.now() - timedelta(seconds=window),
+                    )
+                    .order_by(Ticket.id.desc())
+                    .first()
+                )
+                if existing is not None:
+                    return existing.ticket_no
             ticket = Ticket(
                 ticket_no=self._mock_ticket_no(),
                 user_id=user_id or 1,

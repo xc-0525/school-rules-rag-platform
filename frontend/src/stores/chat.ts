@@ -49,6 +49,12 @@ export const useChatStore = defineStore('chat', {
       if (message) message.content += text
     },
 
+    /** 引用校验失败触发重新生成时，先清空上一版草稿 */
+    resetMessage(index: number) {
+      const message = this.messages[index]
+      if (message) message.content = ''
+    },
+
     setSources(index: number, sources: SourceItem[], cached = false) {
       const message = this.messages[index]
       if (!message) return
@@ -66,6 +72,8 @@ export const useChatStore = defineStore('chat', {
       message.cached = !!payload.cached
       message.latency_ms = payload.latency_ms
       message.runtime = payload.runtime
+      // 落库回执直接带 message_id，省掉"再查一次会话详情"的额外请求
+      if (payload.message_id) message.id = payload.message_id
       message.pending = false
       if (payload.runtime) this.lastRuntime = payload.runtime
     },

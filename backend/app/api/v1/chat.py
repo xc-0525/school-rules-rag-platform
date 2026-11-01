@@ -50,8 +50,13 @@ def _done_payload(state: AgentState, engine: WorkflowEngine, started: float) -> 
         "refused": state.refused,
         "degraded": state.degraded,
         "cached": state.cached,
+        "grounding_status": state.grounding_status,
+        "grounding_reason": state.grounding_reason,
         "conversation_id": state.conversation_id,
+        "message_id": state.message_id,
         "intent": state.intent,
+        "expansion_terms": state.expansion_terms,
+        "evidence_meta": state.evidence_meta,
         "retrieval_round": state.retrieval_round,
         "regen_count": state.regen_count,
         "latency_ms": int((time.perf_counter() - started) * 1000),
@@ -64,9 +69,37 @@ def build_router(
     settings: Settings,
     nodes: dict[str, Any],
     entry: str,
+    limiter: Any = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["问答"])
     current_user = build_current_user_dependency(settings)
+
+    def _rate_key(user: AuthUser) -> str:
+        return f"u:{user.id}"
+
+    def _guard_daily(user: AuthUser) -> str:
+        """日配额检查；返回限流键。未启用限流时只返回键。"""
+        key = _rate_key(user)
+        if limiter is not None and settings.rate_limit_enabled:
+            allowed, _ = limiter.hit_daily(key)
+            if not allowed:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"今日问答次数已达上限（{settings.rate_limit_per_day} 次），请明天再试",
+                )
+        return key
+
+    def _acquire(key: str) -> None:
+        if limiter is not None and settings.rate_limit_enabled and not limiter.acquire(key):
+            raise HTTPException(
+                status_code=429,
+                detail="已有问答正在进行，请等上一条回答结束后再提问",
+                headers={"Retry-After": "1"},
+            )
+
+    def _release(key: str) -> None:
+        if limiter is not None and settings.rate_limit_enabled:
+            limiter.release(key)
 
     def make_engine(bus: Any = None) -> WorkflowEngine:
         return WorkflowEngine(nodes, entry, services, settings, bus)
@@ -91,21 +124,28 @@ def build_router(
         },
         summary="多智能体问答（真实 DeepSeek + SSE 流式 + Agent 轨迹）",
     )
-    async def chat(request: ChatRequest, user: AuthUser | None = Depends(current_user)):
+    async def chat(request: ChatRequest, user: AuthUser = Depends(current_user)):
+        # current_user 要么返回真实用户，要么返回独立的 anonymous 账号，不会返回 None；
+        # 因此这里不存在"匿名回落 user_id=1（管理员）"的越权路径。
         state = AgentState(
             query=request.query,
             conversation_id=request.conversation_id,
-            user_id=user.id if user else 1,
+            user_id=user.id,
             run_id=uuid.uuid4().hex[:12],
         )
 
+        rate_key = _guard_daily(user)
+
         # ---------------- 非流式：一次性 JSON（Swagger 调试方便） ----------------
         if not request.stream:
+            _acquire(rate_key)
             engine = make_engine()
             try:
                 final = await engine.run(state)
             except Exception as exc:  # noqa: BLE001
                 raise HTTPException(status_code=502, detail=_friendly_error(exc)) from exc
+            finally:
+                _release(rate_key)
             return ChatResponse(
                 query=final.query,
                 answer=final.answer,
@@ -113,7 +153,10 @@ def build_router(
                 refused=final.refused,
                 degraded=final.degraded,
                 cached=final.cached,
+                grounding_status=final.grounding_status,
+                grounding_reason=final.grounding_reason,
                 conversation_id=final.conversation_id,
+                message_id=final.message_id,
                 runtime=engine.runtime_info(final),
             )
 
@@ -131,16 +174,28 @@ def build_router(
             finally:
                 await bus.close()
 
-        task = asyncio.create_task(runner())
+        _acquire(rate_key)
+        try:
+            task = asyncio.create_task(runner())
+        except Exception:
+            _release(rate_key)
+            raise
 
         async def event_stream():
-            while True:
-                item = await bus.get()
-                if item is None:
-                    break
-                event, payload = item
-                yield sse_event(event, payload)
-            await task  # 让后台任务里的异常在响应结束时暴露（runner 已自行兜底）
+            try:
+                while True:
+                    item = await bus.get()
+                    if item is None:
+                        break
+                    event, payload = item
+                    yield sse_event(event, payload)
+                await task  # 让后台任务里的异常在响应结束时暴露（runner 已自行兜底）
+            finally:
+                # P2-4：客户端中途断开（关闭页面/切网）时，取消后台图执行，
+                # 否则会继续调用大模型、继续写库，白烧 token。
+                if not task.done():
+                    task.cancel()
+                _release(rate_key)
 
         return StreamingResponse(
             event_stream(),

@@ -7,10 +7,14 @@ Day2 会把 MockVectorStore 换成 Qdrant 本地嵌入式模式，MockGraphStore
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from typing import Any, Protocol
 
 from app.schemas.chat import Evidence, SourceItem
-from app.services import mock_data
+from app.services import lexicon, mock_data
+
+logger = logging.getLogger("app.stores")
 
 
 class VectorStore(Protocol):
@@ -56,25 +60,47 @@ class MockVectorStore:
         return hits[:top_k]
 
 
-class MockGraphStore:
-    """模拟 Neo4j：关键词命中关系路径。"""
+def calibrate_graph_score(
+    hits: int, keyword_count: int, min_score: float = 0.30, max_score: float = 0.95
+) -> float:
+    """把"命中几个关键词"折算成 0~1 的可比分数。
 
-    def __init__(self) -> None:
+    P1-3 的核心：旧实现 `min(0.95, 0.55 + 0.1*hits)` 只要命中 1 个词就 ≥0.65，
+    永远高于向量 cosine 的常见区间，导致"图谱一命中就判证据充分"。
+    改成按**关键词覆盖率**线性折算后，只命中 1/4 关键词的条款拿不到高分。
+    """
+    if keyword_count <= 0 or hits <= 0:
+        return 0.0
+    coverage = min(1.0, hits / keyword_count)
+    return round(min(max_score, min_score + (max_score - min_score) * coverage), 4)
+
+
+class MockGraphStore:
+    """模拟 Neo4j：关键词命中关系路径（分数按覆盖率标定）。"""
+
+    def __init__(self, min_score: float = 0.30, max_score: float = 0.95) -> None:
         self._corpus = mock_data.GRAPH_CORPUS
+        self._min_score = min_score
+        self._max_score = max_score
 
     async def search_paths(self, query: str, top_k: int = 2) -> list[Evidence]:
         hits: list[Evidence] = []
         for item in self._corpus:
-            if any(keyword in query for keyword in item["keywords"]):
-                hits.append(
-                    Evidence(
-                        type="graph",
-                        title="知识图谱关系路径",
-                        detail=item["path_id"],
-                        snippet=item["content"],
-                        score=item["score"],
-                    )
+            keywords = item["keywords"]
+            matched = [keyword for keyword in keywords if keyword in query]
+            if not matched:
+                continue
+            hits.append(
+                Evidence(
+                    type="graph",
+                    title="知识图谱关系路径",
+                    detail=item["path_id"],
+                    snippet=item["content"],
+                    score=calibrate_graph_score(
+                        len(matched), len(keywords), self._min_score, self._max_score
+                    ),
                 )
+            )
         hits.sort(key=lambda item: item.score, reverse=True)
         return hits[:top_k]
 
@@ -82,26 +108,52 @@ class MockGraphStore:
 class MockSemanticCache:
     """问题归一化缓存（精确匹配，非向量语义缓存）。
 
+    P1-8 修复：
+    - 加 TTL：文档更新后即使忘了 clear，也不会长期返回旧答案；
+    - 加容量上限：防止长期运行内存无限增长；
+    - 命中/写入策略在 nodes.py 里进一步收紧（指代型追问不查缓存、
+      多轮会话的答案不写全局缓存），避免"同一个短问题在不同上下文串味"。
+
     说明：当前只是把问题去掉标点/空格/转小写后做 dict 精确查找，
     答辩时建议称呼为"问题归一化缓存"；真正的语义缓存需要 embedding 相似度。
     """
 
-    def __init__(self) -> None:
-        self._data: dict[str, tuple[str, list[SourceItem]]] = {
-            normalize_question(question): (
-                value["answer"],
-                [SourceItem(**source) for source in value["sources"]],
-            )
-            for question, value in mock_data.CACHE_SEED.items()
-        }
+    def __init__(self, ttl_seconds: int = 1800, max_entries: int = 1000) -> None:
+        self._ttl = max(0, int(ttl_seconds))
+        self._max_entries = max(1, int(max_entries))
+        self._data: dict[str, tuple[float, str, list[SourceItem]]] = {}
+        now = time.time()
+        for question, value in mock_data.CACHE_SEED.items():
+            self.store(question, value["answer"], [SourceItem(**source) for source in value["sources"]])
+        self._now = now
 
     def lookup(self, query: str) -> tuple[str, list[SourceItem]] | None:
-        return self._data.get(normalize_question(query))
+        key = normalize_question(query)
+        row = self._data.get(key)
+        if row is None:
+            return None
+        expires_at, answer, sources = row
+        if expires_at <= time.time():
+            self._data.pop(key, None)
+            return None
+        return answer, list(sources)
 
     def store(self, query: str, answer: str, sources: list[SourceItem]) -> None:
         if not answer:
             return
-        self._data[normalize_question(query)] = (answer, list(sources))
+        if len(self._data) >= self._max_entries:
+            self._evict()
+        expires_at = time.time() + self._ttl if self._ttl else float("inf")
+        self._data[normalize_question(query)] = (expires_at, answer, list(sources))
+
+    def _evict(self) -> None:
+        """先清过期，再淘汰最接近过期的一条。"""
+        now = time.time()
+        for key in [k for k, row in self._data.items() if row[0] <= now]:
+            self._data.pop(key, None)
+        if len(self._data) >= self._max_entries and self._data:
+            oldest = min(self._data.items(), key=lambda item: item[1][0])[0]
+            self._data.pop(oldest, None)
 
     def clear(self) -> None:
         """清空缓存（文档上传/删除后调用，避免旧答案/旧来源继续命中）。"""
@@ -135,6 +187,8 @@ class QdrantVectorStore:
         self.corpus = corpus or mock_data.VECTOR_CORPUS
         self._client: Any = None
         self._lock = asyncio.Lock()
+        # 编码是 CPU 密集的，单独用信号量限并发；不再串在 Qdrant 客户端的锁上
+        self._encode_sem = asyncio.Semaphore(4)
 
     # ---------------- 初始化 / 种子数据 ----------------
     def ensure_ready(self) -> None:
@@ -179,11 +233,16 @@ class QdrantVectorStore:
 
     # ---------------- 检索 ----------------
     async def search(self, query: str, top_k: int = 3) -> list[Evidence]:
+        # 只有"初始化"和"客户端调用"需要加锁；编码放到锁外，
+        # 否则所有并发用户的检索会被 BGE 编码串成一条队列（P2-1）。
         async with self._lock:
             await asyncio.to_thread(self.ensure_ready)
+            client = self._client
+        async with self._encode_sem:
             vector = await asyncio.to_thread(self.embedder.encode_one, query)
+        async with self._lock:
             hits = await asyncio.to_thread(
-                lambda: self._client.query_points(
+                lambda: client.query_points(
                     collection_name=self.collection,
                     query=vector,
                     limit=top_k,
@@ -214,24 +273,8 @@ class QdrantVectorStore:
                 self._client = None
 
 
-# 查询关键词：来自意图词典 + 查询扩展词典 + 校规高频词（中文小语料用包含匹配最稳）
-_GRAPH_TERMS: set[str] = set()
-for _keywords in mock_data.INTENT_KEYWORDS.values():
-    _GRAPH_TERMS.update(_keywords)
-for _synonyms in mock_data.EXPANSIONS.values():
-    _GRAPH_TERMS.update(_synonyms)
-_GRAPH_TERMS.update(
-    {
-        "熄灯", "晚归", "夜不归宿", "查寝", "电器", "大功率", "作弊", "手机", "考试",
-        "奖学金", "助学金", "励志", "请假", "旷课", "考勤", "打架", "斗殴", "处分",
-        "开除", "记过", "留校察看", "论文", "抄袭", "学籍", "注册", "转专业", "休学",
-        "退学", "补考", "重修", "评奖", "评优", "宿舍", "宿舍管理", "总则", "附则",
-        # 校园服务类（图书馆/食堂/校园卡/网络/医疗/心理/就业/场馆）
-        "图书馆", "借阅", "续借", "自习", "食堂", "校园卡", "挂失", "补办",
-        "校园网", "网络", "校园码", "校医院", "医疗", "心理咨询", "心理",
-        "就业", "招聘", "场馆", "体育", "游泳", "社团", "预约",
-    }
-)
+# 查询关键词：来自领域词典（app/services/lexicon.py），不是 mock 数据
+_GRAPH_TERMS: set[str] = set(lexicon.GRAPH_TERMS)
 
 
 def extract_graph_keywords(query: str) -> list[str]:
@@ -257,11 +300,17 @@ class Neo4jGraphStore:
         user: str = "",
         password: str = "",
         database: str = "neo4j",
+        min_score: float = 0.30,
+        max_score: float = 0.95,
+        min_coverage: float = 0.34,
     ) -> None:
         self.uri = uri or "bolt://127.0.0.1:7687"
         self.user = user
         self.password = password
         self.database = database
+        self._min_score = min_score
+        self._max_score = max_score
+        self._min_coverage = min_coverage
         self._driver: Any = None
 
     def _auth(self) -> tuple[str, str] | None:
@@ -283,6 +332,27 @@ class Neo4jGraphStore:
             finally:
                 self._driver = None
 
+    @staticmethod
+    def _expand_by_topic(session: Any, rows: list[dict], limit: int) -> list[dict]:
+        """沿共享 Topic 找相邻条款（一跳）。
+
+        只在直接命中不足 top_k 时触发；返回的行 `hits` 按 1 计、并带 hop=2，
+        打分时会被折价，避免"邻居"顶掉真正命中的条款。
+        """
+        chunk_ids = [row.get("chunk_id") for row in rows if row.get("chunk_id")]
+        if not chunk_ids or limit <= 0:
+            return []
+        cypher = """
+        MATCH (n:Rule)-[:ABOUT]->(t:Topic)<-[:ABOUT]-(r:Rule)
+        WHERE r.chunk_id IN $chunk_ids AND n.chunk_id <> r.chunk_id
+        MATCH (d:RuleDocument)-[:HAS_CHAPTER]->(c:Chapter)-[:HAS_RULE]->(n)
+        RETURN DISTINCT d.title AS document, c.title AS chapter, n.article AS article,
+               n.content AS content, collect(DISTINCT t.name) AS topics,
+               1 AS hits, 2 AS hop, n.chunk_id AS chunk_id
+        LIMIT $limit
+        """
+        return session.run(cypher, chunk_ids=chunk_ids, limit=limit).data()
+
     async def search_paths(self, query: str, top_k: int = 2) -> list[Evidence]:
         return await asyncio.to_thread(self._search_sync, query, top_k)
 
@@ -301,24 +371,43 @@ class Neo4jGraphStore:
              size([kw IN $keywords WHERE r.content CONTAINS kw
                    OR r.article CONTAINS kw OR c.title CONTAINS kw]) AS hits
         RETURN d.title AS document, c.title AS chapter, r.article AS article,
-               r.content AS content, topics, hits
+               r.content AS content, topics, hits, r.chunk_id AS chunk_id, 1 AS hop
         ORDER BY hits DESC, document, article
         LIMIT $top_k
         """
         driver = self._get_driver()
         with driver.session(database=self.database) as session:
             rows = session.run(cypher, keywords=keywords, top_k=top_k).data()
+            # 命中不足时做一次"条款 → 主题 → 相邻条款"的扩展（真一跳关系）。
+            # 论文里如实描述为"主题关联扩展"，不要写成"多跳推理"。
+            if rows and len(rows) < top_k:
+                try:
+                    rows.extend(self._expand_by_topic(session, rows, top_k - len(rows)))
+                except Exception:  # noqa: BLE001 —— 扩展失败不影响主检索
+                    logger.exception("图谱主题扩展失败，返回直接命中结果")
 
         evidence: list[Evidence] = []
+        keyword_count = max(1, len(keywords))
         for row in rows:
+            hits = int(row.get("hits") or 0)
+            coverage = hits / keyword_count
+            if coverage < self._min_coverage:
+                continue  # 只蹭到一个泛词，不足以作为证据
             topics = "、".join(row.get("topics") or []) or "校规"
+            hop = int(row.get("hop") or 1)
+            score = calibrate_graph_score(
+                hits, keyword_count, self._min_score, self._max_score
+            )
+            if hop > 1:
+                score = round(score * 0.85, 4)  # 邻居证据折价
+                topics = f"{topics}；经主题关联扩展"
             evidence.append(
                 Evidence(
                     type="graph",
                     title=f"知识图谱 · {row['document']}",
                     detail=f"{row['chapter']} · {row['article']}（主题：{topics}）",
                     snippet=row["content"],
-                    score=min(0.95, 0.55 + 0.1 * int(row.get("hits") or 1)),
+                    score=score,
                 )
             )
         return evidence

@@ -6,6 +6,8 @@ export interface StreamHandlers {
   onTool?: (event: Record<string, any>) => void
   onMeta?: (payload: { sources?: SourceItem[]; cached?: boolean; refused?: boolean }) => void
   onDelta?: (text: string) => void
+  /** 重新生成前清空当前气泡，避免两版答案被拼在一起 */
+  onReset?: (payload: { reason?: string; regen_count?: number }) => void
   onDone?: (payload: ChatDonePayload) => void
   onError?: (message: string) => void
 }
@@ -72,6 +74,7 @@ export async function streamChat(
     else if (event === 'tool') handlers.onTool?.(data)
     else if (event === 'meta') handlers.onMeta?.(data)
     else if (event === 'delta') handlers.onDelta?.(data.content ?? '')
+    else if (event === 'reset') handlers.onReset?.(data)
     else if (event === 'done') handlers.onDone?.(data)
     else if (event === 'error') handlers.onError?.(data.message ?? '未知错误')
   }

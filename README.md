@@ -10,7 +10,7 @@
 
 > 毕业设计（2026.09 - 至今）· 独立开发
 > **题目定稿：《基于 FastAPI 和 Vue 的校园服务智能问答系统的设计与实现》**（原题目《基于 RAG 与多智能体协作的校纪校规问答平台》，变更记录见 [`docs/选题与名称记录.md`](docs/选题与名称记录.md)）。
-> 面向高校学生的校园服务垂直领域问答系统（以校纪校规为核心语料，覆盖图书馆、食堂、校园卡、医疗、心理、就业、场馆等校园服务事项）：以 **GraphRAG + 多智能体协作** 为核心，融合向量语义召回与知识图谱多跳推理，并通过证据约束机制抑制大模型幻觉。
+> 面向高校学生的校园服务垂直领域问答系统（以校纪校规为核心语料，覆盖图书馆、食堂、校园卡、医疗、心理、就业、场馆等校园服务事项）：以 **GraphRAG + 多智能体协作** 为核心，融合向量语义召回与知识图谱主题关联扩展（条款→主题→相邻条款，1 跳），并通过证据约束机制抑制大模型幻觉。
 
 🔗 项目地址：<https://github.com/xc-0525/school-rules-rag-platform>
 
@@ -65,7 +65,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
 > 实际演示用 `start_backend.ps1` 时会自动设置 `AUTH_REQUIRED=1`（所有业务接口需带 Bearer token）。
-> 当前测试：**46 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆）；
+> 当前测试：**65 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆 + 审查整改回归）；
 > 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
 > 本轮已修复：降级答案不再进缓存、文档上传/删除后清空缓存、上传前预检 Neo4j 并在失败时回滚半成品、
 > 图谱标题引用校验误判、启动脚本固定全局 Python。
@@ -75,8 +75,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 1. **校规内容为虚构样例**：`rules/学生手册节选.md` 只用于跑通链路，拿到学校真实文件后替换并重新入库即可；
 2. **扫描件 OCR 已可用但建议人工抽查**：`rapidocr_onnxruntime` + Pillow 已安装，实测单页约 8 秒；
    OCR 可能把「第1条」识别成「第1 条」（已做文本归一化修正），但真实扫描件的错字/页眉页脚仍需入库前抽查；
-3. **登录是演示级 token**：token 存在后端进程内存里（8 小时），重启后端需重新登录；未做 JWT/刷新令牌，
-   学生/管理员权限只区分"文档管理"；注册未做邮箱验证/验证码/审核，适合课程演示，不适合直接上线；
+3. **登录令牌**：已改为无状态签名令牌（HMAC-SHA256，标准库实现，不引入新依赖），
+   配置 `AUTH_TOKEN_SECRET` 后重启/多 worker 仍然有效；**未配置时密钥为进程内随机值**，
+   重启即失效（会在启动日志中告警）。登出用 jti 吊销表，多 worker 下按实例生效。
+   仍未实现刷新令牌；注册未做邮箱验证/验证码/审核，适合课程演示，不适合直接公开上线；
+   **鉴权默认开启**（`AUTH_REQUIRED=1`）：匿名只在显式 `DEV_MODE=1` 时放行，
+   且使用独立的 `anonymous` 账号，不再回落 admin；
 4. **Swagger UI 中的流式响应是“一次性显示”的**：想看打字机效果请用前端 <http://127.0.0.1:5173> 或 `curl -N`；
 5. **“语义缓存”实际是问题归一化 + 精确匹配**：答辩时建议称“问题归一化缓存”，真正的向量语义缓存是后续计划；
 6. 本地 MySQL 是 **5.5.11**（较老），脚本已做兼容；答辩后再评估升级 8.0。
@@ -96,7 +100,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 ## 二、核心特性
 
 - **多库混合存储架构**：MySQL（业务数据 + 分块元数据）、Neo4j（校规知识图谱）、Qdrant（向量索引）三库分工，通过 `qdrant_point_id` 映射实现**数据溯源**。
-- **多智能体协作编排**：设计"**检索 Agent → 图谱 Agent → 生成 Agent**"工作流，Qdrant 向量召回与 Neo4j 多跳推理并行执行，多路证据统一交由生成 Agent 产出答案。
+- **多智能体协作编排**：设计"**检索 Agent → 图谱 Agent → 生成 Agent**"工作流，Qdrant 向量召回与 Neo4j 图谱检索并行执行，多路证据经 RRF 融合后统一交由生成 Agent 产出答案。
 - **本地中文 Embedding**：使用本地部署的 `BGE-small-zh` 生成向量，数据不出校、调用零成本，适合中文校规文本。
 - **防幻觉机制**：
   - 证据约束提示词，答案只能基于召回的条款片段生成；
@@ -119,7 +123,7 @@ flowchart TB
         CACHE[(高频问题<br/>语义缓存)]
         subgraph Agents["多智能体编排层"]
             RA["检索 Agent<br/>向量语义召回"]
-            GA["图谱 Agent<br/>多跳关系推理"]
+            GA["图谱 Agent<br/>主题关联扩展"]
             GE["生成 Agent<br/>证据约束生成 / 拒答判定"]
         end
     end
@@ -154,7 +158,7 @@ flowchart LR
     C -->|命中| A0[直接返回缓存答案]
     C -->|未命中| E[BGE-small-zh 向量化]
     E --> R[检索 Agent<br/>Qdrant 语义召回 Top-K 条款]
-    Q --> G[图谱 Agent<br/>Neo4j 多跳推理]
+    Q --> G[图谱 Agent<br/>Neo4j 主题关联扩展]
     R --> M[多路证据融合<br/>映射回 MySQL 溯源]
     G --> M
     M --> J{证据是否充分?}
@@ -171,7 +175,7 @@ flowchart LR
 | 前端 | Vue 3、Vite、TypeScript |
 | 后端 | Python、FastAPI、SQLAlchemy、SSE 流式响应 |
 | 关系数据库 | MySQL 8.0（InnoDB / utf8mb4） |
-| 图数据库 | Neo4j 5.x（校规实体与关系、多跳推理） |
+| 图数据库 | Neo4j 5.x（校规实体与关系、主题关联扩展） |
 | 向量数据库 | Qdrant（BGE 向量存储与 ANN 检索） |
 | Embedding | 本地 BGE-small-zh（中文向量模型） |
 | 大模型 | DeepSeek（证据约束答案生成） |
@@ -185,7 +189,7 @@ flowchart LR
 | --- | --- | --- |
 | **MySQL** | 业务数据、文档/分块元数据、ID 映射 | 向量与图谱均**不冗余**存储于此，仅通过 ID 关联 |
 | **Qdrant** | 分块向量及 ANN 索引 | 向量点 ID 回写 `chunks.qdrant_point_id` |
-| **Neo4j** | 校规知识图谱（节点 + 关系） | 支撑实体关联查询与多跳推理 |
+| **Neo4j** | 校规知识图谱（节点 + 关系） | 支撑实体关联查询与主题关联扩展（1 跳） |
 
 **数据溯源链路**：
 
@@ -415,8 +419,17 @@ DEEPSEEK_API_KEY=sk-REPLACE_ME
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
 
-# 登录鉴权：1=业务接口必须带 Bearer token（start_backend.ps1 默认开启），0=允许匿名
+# 登录鉴权：1=业务接口必须带 Bearer token（默认值；start_backend.ps1 也设 1）
 AUTH_REQUIRED=1
+# 仅本地调试/测试使用：允许匿名（与 AUTH_REQUIRED=1 互斥，同时开启会启动失败）
+DEV_MODE=0
+# token 签名密钥（多 worker / 重启免登录必填）
+# 生成：python -c "import secrets;print(secrets.token_urlsafe(32))"
+AUTH_TOKEN_SECRET=
+# 限流与配额（公网部署必备）
+RATE_LIMIT_ENABLED=1
+RATE_LIMIT_PER_MINUTE=20
+RATE_LIMIT_PER_DAY=300
 
 # 单端口演示：1=后端托管 frontend/dist（先 npm run build），访问 8000 即可看到前端
 SERVE_FRONTEND=1
@@ -577,6 +590,10 @@ school-rules-rag-platform/
 - MySQL 数据库设计：11 张表、外键与索引、`qdrant_point_id` 映射与溯源链路；建表脚本已落地并通过 5.5.11 实测
 - **Tool Calling + 多轮记忆**：LLM 自主选择 3 个真实工具（检索/公告/工单），ReAct 循环；历史消息注入 + 追问改写
 - **Docker Compose 公网部署**：frontend/backend/MySQL/Neo4j/Qdrant 五服务，见 `docs/deploy-public.md`
+- **代码审查整改（P0/P1）**：鉴权默认安全 + 匿名独立身份、token 无状态签名、限流/日配额/并发闸门、
+  引用校验三态 + 条款号核对、查询拆分为 generation/retrieval、查询扩展不再空转、图谱分按覆盖率标定 + RRF 融合、
+  工单意图门禁与幂等、缓存 TTL、SSE reset 事件与断开取消、审计日志转线程池、上传者身份贯通
+- **离线评测脚本**：`backend/scripts/evaluate.py` + `tests/golden/qa_set.json`（recall@3 / MRR / 拒答准确率 / 引用通过率 / p50·p95）
 - Neo4j 图谱本体（Ontology）设计
 - **极简版多智能体闭环**：检索 / 图谱 Agent 并行召回（Mock）+ 证据融合 + 防幻觉拒答 + DeepSeek 流式生成 + MySQL Mock 落库
 - **v2 正式工程（课程答辩版）**：

@@ -125,12 +125,21 @@ class RulesIngestor:
             result.titles.append(document.title)
         return result
 
-    def ingest_parsed(self, document: ParsedDocument, replace: bool = True) -> dict[str, Any]:
-        """上传接口入口：入库单个已解析文档，返回 document_id 等信息。"""
+    def ingest_parsed(
+        self,
+        document: ParsedDocument,
+        replace: bool = True,
+        uploaded_by: int | None = None,
+    ) -> dict[str, Any]:
+        """上传接口入口：入库单个已解析文档，返回 document_id 等信息。
+
+        uploaded_by 由路由层传入（P0-1 修复：此前写死 user_id=1，
+        导致所有文档都记在 admin 名下，且 dev 模式的匿名上传无法追溯）。
+        """
         self.preflight()
         if replace:
             self._delete_by_file_name(document.file_name)
-        return self._ingest_document(document)
+        return self._ingest_document(document, uploaded_by)
 
     # ------------------------------------------------------------ 依赖预检
     def preflight(self) -> None:
@@ -221,8 +230,10 @@ class RulesIngestor:
         from app.db.models import Document
 
         with new_session(self.mysql_url) as session:
+            # 用 limit(1) 而不是 scalar_one_or_none：同名文档存在多条时，
+            # 后者会抛 MultipleResultsFound，让整个上传 500（P2-9）
             document_id = session.execute(
-                select(Document.id).where(Document.file_name == file_name)
+                select(Document.id).where(Document.file_name == file_name).limit(1)
             ).scalar_one_or_none()
         if document_id is not None:
             self.delete_document(int(document_id))
@@ -268,7 +279,9 @@ class RulesIngestor:
             driver.close()
 
     # ------------------------------------------------------------ 单文档写入
-    def _ingest_document(self, document: ParsedDocument) -> dict[str, Any]:
+    def _ingest_document(
+        self, document: ParsedDocument, uploaded_by: int | None = None
+    ) -> dict[str, Any]:
         from sqlalchemy import select
 
         from app.db.models import Chunk, Document, DocumentTag, DocumentTagRelation
@@ -279,7 +292,7 @@ class RulesIngestor:
         with new_session(self.mysql_url) as session:
             file_size = Path(document.file_path).stat().st_size if Path(document.file_path).exists() else 0
             record = Document(
-                user_id=DEMO_USER_ID,
+                user_id=int(uploaded_by or DEMO_USER_ID),
                 title=document.title,
                 file_name=document.file_name,
                 file_path=document.file_path,

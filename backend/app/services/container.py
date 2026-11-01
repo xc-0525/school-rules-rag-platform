@@ -64,14 +64,23 @@ def build_services(settings: Settings) -> Services:
             uri=settings.neo4j_uri,
             user=settings.neo4j_user,
             password=settings.neo4j_password,
+            min_score=settings.graph_min_score,
+            max_score=settings.graph_max_score,
+            min_coverage=settings.graph_keyword_min_coverage,
         )
     else:
-        graph = MockGraphStore()
+        graph = MockGraphStore(
+            min_score=settings.graph_min_score,
+            max_score=settings.graph_max_score,
+        )
 
     return Services(
         llm=llm,
         vector=vector,
         graph=graph,
         persistence=MySQLPersistence(settings.mysql_url) if settings.mysql_url else MockPersistence(),
-        cache=MockSemanticCache(),
+        cache=MockSemanticCache(
+            ttl_seconds=settings.cache_ttl_seconds,
+            max_entries=settings.cache_max_entries,
+        ),
     )

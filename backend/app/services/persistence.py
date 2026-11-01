@@ -25,7 +25,7 @@ def _iso(value: datetime | None) -> str | None:
 
 
 class Persistence(Protocol):
-    async def save_qa(self, state: AgentState) -> int | None: ...
+    async def save_qa(self, state: AgentState) -> dict[str, int | None]: ...
 
     async def list_conversations(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]: ...
 
@@ -55,7 +55,7 @@ class MockPersistence:
         self._messages: dict[int, dict[str, Any]] = {}
         self._feedback: dict[tuple[int, int], dict[str, Any]] = {}
 
-    async def save_qa(self, state: AgentState) -> int | None:
+    async def save_qa(self, state: AgentState) -> dict[str, int | None]:
         user_id = int(getattr(state, "user_id", DEMO_USER_ID) or DEMO_USER_ID)
         with self._lock:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -79,7 +79,7 @@ class MockPersistence:
             conversation = self._conversations[conversation_id]
 
             self._append_message(conversation_id, "user", state.query, [], 0, False, False)
-            self._append_message(
+            assistant_id = self._append_message(
                 conversation_id,
                 "assistant",
                 state.answer,
@@ -90,7 +90,7 @@ class MockPersistence:
             )
             conversation["updated_at"] = now
             conversation["message_count"] += 2
-            return conversation_id
+            return {"conversation_id": conversation_id, "assistant_message_id": assistant_id}
 
     def _append_message(
         self,
@@ -101,7 +101,7 @@ class MockPersistence:
         latency_ms: int,
         refused: bool,
         degraded: bool,
-    ) -> None:
+    ) -> int:
         self._message_seq += 1
         self._messages[self._message_seq] = {
             "id": self._message_seq,
@@ -114,6 +114,7 @@ class MockPersistence:
             "degraded": degraded,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
+        return self._message_seq
 
     async def list_conversations(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
@@ -138,7 +139,12 @@ class MockPersistence:
         self, message_id: int, user_id: int, rating: int, comment: str | None
     ) -> dict[str, Any] | None:
         with self._lock:
-            if message_id not in self._messages:
+            message = self._messages.get(message_id)
+            if message is None:
+                return None
+            # 越权修复（与 MySQL 实现保持一致）：只能反馈自己会话里的消息
+            conversation = self._conversations.get(message["conversation_id"])
+            if conversation is None or conversation["user_id"] != user_id:
                 return None
             key = (message_id, user_id)
             if key not in self._feedback:
@@ -182,10 +188,10 @@ class MySQLPersistence:
         self.url = url
 
     # ---- 问答落库 ----
-    async def save_qa(self, state: AgentState) -> int | None:
+    async def save_qa(self, state: AgentState) -> dict[str, int | None]:
         return await asyncio.to_thread(self._save_qa_sync, state)
 
-    def _save_qa_sync(self, state: AgentState) -> int:
+    def _save_qa_sync(self, state: AgentState) -> dict[str, int | None]:
         from app.db.models import Conversation, Message
         from app.db.session import new_session
 
@@ -210,32 +216,37 @@ class MySQLPersistence:
                 if state.sources
                 else None
             )
-            session.add_all(
-                [
-                    Message(
-                        conversation_id=conversation.id,
-                        role="user",
-                        content=state.query,
-                        tokens=0,
-                        latency_ms=0,
-                        refused=0,
-                        degraded=0,
-                    ),
-                    Message(
-                        conversation_id=conversation.id,
-                        role="assistant",
-                        content=state.answer,
-                        sources=sources_json,
-                        tokens=0,
-                        latency_ms=int(state.latency_ms or 0),
-                        refused=1 if state.refused else 0,
-                        degraded=1 if state.degraded else 0,
-                    ),
-                ]
+            session.add(
+                Message(
+                    conversation_id=conversation.id,
+                    role="user",
+                    content=state.query,
+                    tokens=0,
+                    latency_ms=0,
+                    refused=0,
+                    degraded=0,
+                )
             )
+            # 逐条 flush 是为了拿到 assistant message id 回传给前端（P2-5），
+            # 省掉"再 GET 一次会话详情"的额外请求。
+            session.flush()
+            assistant = Message(
+                conversation_id=conversation.id,
+                role="assistant",
+                content=state.answer,
+                sources=sources_json,
+                tokens=0,
+                latency_ms=int(state.latency_ms or 0),
+                refused=1 if state.refused else 0,
+                degraded=1 if state.degraded else 0,
+            )
+            session.add(assistant)
             conversation.updated_at = datetime.now()
             session.commit()
-            return int(conversation.id)
+            return {
+                "conversation_id": int(conversation.id),
+                "assistant_message_id": int(assistant.id),
+            }
 
     # ---- 会话列表 / 详情 ----
     async def list_conversations(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
@@ -366,11 +377,16 @@ class MySQLPersistence:
     ) -> dict[str, Any] | None:
         from sqlalchemy import select
 
-        from app.db.models import Feedback, Message
+        from app.db.models import Conversation, Feedback, Message
         from app.db.session import new_session
 
         with new_session(self.url) as session:
-            if session.get(Message, message_id) is None:
+            message = session.get(Message, message_id)
+            if message is None:
+                return None
+            # 越权修复：只能给自己会话里的消息点赞/点踩（此前只校验消息存在）
+            owner = session.get(Conversation, message.conversation_id)
+            if owner is None or owner.user_id != user_id:
                 return None
             feedback = session.execute(
                 select(Feedback).where(

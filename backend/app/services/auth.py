@@ -1,15 +1,25 @@
-"""登录鉴权（演示级实现）。
+"""登录鉴权。
 
-- 账号：MySQL `users` 表（sql/init_mysql.sql 预置 admin / student 两个账号，
-  初始密码见项目交付说明，不写入仓库）；未配置 MySQL（Mock 模式）时，
-  可通过环境变量 DEMO_ADMIN_PASSWORD / DEMO_STUDENT_PASSWORD 配置演示账号。
-- token：进程内随机 token（8 小时有效）；服务重启后需重新登录。
-- 未上 JWT/Redis，原因是课程演示单进程即可；接口与前端已按 Bearer token 对接，
-  后续换成 JWT 只需替换 issue/resolve 两个方法。
+P0-1 / P0-2 改造要点：
+
+1. **默认安全**：`Settings.auth_required` 默认 True；只有显式 `DEV_MODE=1` 才放匿名。
+2. **匿名不再冒充管理员**：匿名请求使用独立的 `anonymous` 账号（MySQL 模式下自动
+   seed 到 users 表，满足 documents.user_id 外键），不再回落 `user_id=1`。
+3. **token 改为无状态签名令牌**（HMAC-SHA256，标准库实现，不引入新依赖）：
+   配置 `AUTH_TOKEN_SECRET` 后多 worker / 重启均可用；未配置则退化为进程内随机密钥。
+   登出通过吊销 jti 实现（吊销表在进程内，多 worker 下按实例生效，已在 README 说明）。
+
+账号来源：MySQL `users` 表；未配置 MySQL（Mock 模式）时用环境变量
+DEMO_ADMIN_PASSWORD / DEMO_STUDENT_PASSWORD 配置演示账号。
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
+import logging
 import os
 import re
 import secrets
@@ -23,11 +33,22 @@ from fastapi import Header, HTTPException
 from app.core.config import Settings
 from app.core.security import hash_password, verify_password
 
-TOKEN_TTL_SECONDS = 8 * 60 * 60
+logger = logging.getLogger("app.auth")
+
+TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL", str(8 * 60 * 60)))
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 
 # 保留用户名：管理员/学生演示账号不开放自助注册（密码不在仓库中出现）
 _RESERVED_USERNAMES = {"admin", "student"}
+
+# 匿名身份在 Mock 模式下的固定 id（MockPersistence 不做外键校验，取值只需稳定不冲突）
+MOCK_ANONYMOUS_ID = 9001
+
+# token 签名密钥：进程启动时确定一次，保证同一进程内多次建 app 的 token 互相有效。
+# 配置了 AUTH_TOKEN_SECRET 时多 worker 共享；未配置时退化为进程内随机值（重启失效）。
+_SECRET: bytes = (os.getenv("AUTH_TOKEN_SECRET", "").strip() or secrets.token_urlsafe(32)).encode(
+    "utf-8"
+)
 
 
 def _demo_users() -> dict[str, tuple[str, str, int, str]]:
@@ -40,6 +61,7 @@ def _demo_users() -> dict[str, tuple[str, str, int, str]]:
     if student_password:
         users["student"] = (student_password, "演示学生", 2, "student")
     return users
+
 
 # Mock 模式下注册的用户（仅进程内有效；真实 MySQL 模式会写 users 表）
 _registered_users: dict[str, dict[str, object]] = {}
@@ -68,58 +90,186 @@ class AuthUser:
         return self.role == "admin"
 
 
-class AuthTokenStore:
-    """进程内 token 表（token → 用户 + 过期时间）。"""
+# ---------------------------------------------------------------------------
+# 无状态签名 token（HMAC-SHA256 + base64url，标准库实现）
+# ---------------------------------------------------------------------------
+def _b64e(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
-    def __init__(self) -> None:
-        self._tokens: dict[str, dict[str, object]] = {}
+
+def _b64d(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _sign(body: str, secret: bytes) -> str:
+    return _b64e(hmac.new(secret, body.encode("ascii"), hashlib.sha256).digest())
+
+
+class AuthTokenStore:
+    """签名令牌：`base64url(payload).base64url(hmac)`。
+
+    - 校验不依赖进程内存（多 worker 可用，前提是配置 AUTH_TOKEN_SECRET）；
+    - 登出通过吊销 jti 实现，吊销表在进程内（多 worker 下按实例生效）。
+    """
+
+    def __init__(self, secret: bytes | None = None, ttl: int = TOKEN_TTL_SECONDS) -> None:
+        self._secret = secret or _SECRET
+        self._ttl = ttl
+        self._revoked: dict[str, float] = {}
         self._lock = threading.Lock()
 
     def issue(self, user: AuthUser) -> tuple[str, int]:
-        token = secrets.token_urlsafe(32)
-        expires_at = time.time() + TOKEN_TTL_SECONDS
-        with self._lock:
-            self._purge_locked()
-            self._tokens[token] = {"user": user, "expires_at": expires_at}
-        return token, TOKEN_TTL_SECONDS
+        now = int(time.time())
+        payload = {
+            "sub": user.id,
+            "u": user.username,
+            "n": user.nickname or "",
+            "r": user.role,
+            "iat": now,
+            "exp": now + self._ttl,
+            "jti": secrets.token_hex(8),
+        }
+        body = _b64e(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        return f"{body}.{_sign(body, self._secret)}", self._ttl
 
     def resolve(self, token: str | None) -> AuthUser | None:
-        if not token:
+        if not token or "." not in token:
             return None
+        body, _, signature = token.partition(".")
+        if not body or not signature:
+            return None
+        # 先验签再解析内容，避免对不可信数据做 JSON 解析
+        if not hmac.compare_digest(signature, _sign(body, self._secret)):
+            return None
+        try:
+            payload = json.loads(_b64d(body))
+        except (ValueError, TypeError):  # 非法 base64 / 非 JSON
+            return None
+        try:
+            expires_at = float(payload["exp"])
+            user_id = int(payload["sub"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if expires_at < time.time():
+            return None
+        jti = str(payload.get("jti") or "")
         with self._lock:
             self._purge_locked()
-            row = self._tokens.get(token)
-            if row is None:
+            if jti and jti in self._revoked:
                 return None
-            if float(row["expires_at"]) < time.time():
-                self._tokens.pop(token, None)
-                return None
-            return row["user"]  # type: ignore[return-value]
+        return AuthUser(
+            id=user_id,
+            username=str(payload.get("u") or ""),
+            nickname=str(payload.get("n") or "") or None,
+            role=str(payload.get("r") or "student"),
+        )
 
     def revoke(self, token: str | None) -> None:
-        if not token:
+        """登出：把 jti 加入吊销表（按 token 自身 exp 过期清理）。"""
+        if not token or "." not in token:
+            return
+        body = token.partition(".")[0]
+        try:
+            payload = json.loads(_b64d(body))
+        except (ValueError, TypeError):
+            return
+        jti = str(payload.get("jti") or "")
+        if not jti:
             return
         with self._lock:
-            self._tokens.pop(token, None)
+            self._revoked[jti] = float(payload.get("exp") or (time.time() + self._ttl))
 
     def _purge_locked(self) -> None:
         now = time.time()
-        expired = [
-            token
-            for token, row in self._tokens.items()
-            if float(row["expires_at"]) < now
-        ]
-        for token in expired:
-            self._tokens.pop(token, None)
+        expired = [jti for jti, exp in self._revoked.items() if exp < now]
+        for jti in expired:
+            self._revoked.pop(jti, None)
 
 
 auth_tokens = AuthTokenStore()
 
 
+# ---------------------------------------------------------------------------
+# 匿名身份
+# ---------------------------------------------------------------------------
+_anonymous_lock = threading.Lock()
+# 缓存键必须带上 mysql_url：否则测试/多实例场景下，先连 A 库拿到的 id
+# 会被后续连 B 库的调用复用，导致匿名流量记到别的库/别的用户身上。
+_anonymous_cache: dict[tuple[str, str], AuthUser] = {}
+
+
+def anonymous_user(settings: Settings) -> AuthUser:
+    """获取（必要时创建）匿名账号。
+
+    绝不复用 user_id=1：那是 admin，会把匿名流量写进管理员会话，
+    也会让 documents.user_id 归属错人。
+    """
+    username = settings.anonymous_username or "anonymous"
+    cache_key = (settings.mysql_url or "", username)
+    with _anonymous_lock:
+        cached = _anonymous_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        resolved: AuthUser | None = None
+        if settings.mysql_url:
+            try:
+                from sqlalchemy import select
+                from sqlalchemy.exc import IntegrityError
+
+                from app.db.models import User
+                from app.db.session import new_session
+
+                with new_session(settings.mysql_url) as session:
+                    row = session.execute(
+                        select(User).where(User.username == username)
+                    ).scalar_one_or_none()
+                    if row is None:
+                        row = User(
+                            username=username,
+                            # 随机密码哈希：该账号无法用密码登录，只能由 dev_mode 以匿名身份使用
+                            password=hash_password(secrets.token_urlsafe(24)),
+                            nickname="匿名访客",
+                            role="student",
+                            status=1,
+                            updated_at=datetime.now(),
+                        )
+                        session.add(row)
+                        try:
+                            session.commit()
+                        except IntegrityError:  # 并发创建，回读已有记录
+                            session.rollback()
+                            row = session.execute(
+                                select(User).where(User.username == username)
+                            ).scalar_one()
+                        else:
+                            session.refresh(row)
+                    resolved = AuthUser(
+                        id=row.id,
+                        username=row.username,
+                        nickname=row.nickname,
+                        role=str(row.role or "student"),
+                    )
+            except Exception:  # noqa: BLE001 —— 建号失败时降级为内存身份，不阻断问答
+                logger.exception("匿名账号初始化失败，降级为内存身份")
+
+        _anonymous_cache[cache_key] = resolved or AuthUser(
+            id=MOCK_ANONYMOUS_ID, username=username, nickname="匿名访客", role="student"
+        )
+        return _anonymous_cache[cache_key]
+
+
+# ---------------------------------------------------------------------------
+# 账号校验 / 注册
+# ---------------------------------------------------------------------------
 def authenticate(settings: Settings, username: str, password: str) -> AuthUser | None:
     """校验账号密码；MySQL 未配置时使用内置演示账号。"""
     username = (username or "").strip()
     if not username or not password:
+        return None
+    # 匿名账号不允许用密码登录
+    if username == (settings.anonymous_username or "anonymous"):
         return None
 
     if settings.mysql_url:
@@ -181,6 +331,8 @@ def register_user(
         raise RegistrationError(400, "密码不能超过 128 位")
     if len(nickname) > 50:
         raise RegistrationError(400, "昵称不能超过 50 个字符")
+    if username == (settings.anonymous_username or "anonymous"):
+        raise RegistrationError(409, "该用户名不可用")
 
     if settings.mysql_url:
         from sqlalchemy import select
@@ -259,21 +411,25 @@ def require_user(authorization: str | None = Header(default=None, alias="Authori
 
 
 def build_current_user_dependency(settings: Settings):
-    """按 AUTH_REQUIRED 生成依赖：
+    """按配置生成"当前用户"依赖。
 
-    - AUTH_REQUIRED=1：必须带有效 Bearer token，否则 401；
-    - 否则允许匿名（本地 mock/测试/curl 兜底），返回 None。
+    返回值**永远**是 AuthUser（不会返回 None）：
+    - 带有效 token → 该用户；
+    - 无 token 且 DEV_MODE=1 → 独立的 anonymous 账号；
+    - 其它情况 → 401。
     """
 
     def current_user(
         authorization: str | None = Header(default=None, alias="Authorization"),
-    ) -> AuthUser | None:
+    ) -> AuthUser:
         token = _extract_bearer(authorization)
         user = auth_tokens.resolve(token) if token else None
         if token and user is None:
             raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
-        if settings.auth_required and user is None:
-            raise HTTPException(status_code=401, detail="请先登录")
-        return user
+        if user is not None:
+            return user
+        if settings.dev_mode:
+            return anonymous_user(settings)
+        raise HTTPException(status_code=401, detail="请先登录")
 
     return current_user

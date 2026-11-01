@@ -48,7 +48,14 @@ def parse_sse(text: str) -> list[tuple[str, dict]]:
 
 
 def make_settings() -> Settings:
-    return Settings(llm_mode="fake", vector_mode="mock", graph_mode="mock")
+    # 测试默认走 dev_mode：匿名身份是独立的 anonymous 账号，不会落到 user_id=1
+    return Settings(
+        llm_mode="fake",
+        vector_mode="mock",
+        graph_mode="mock",
+        auth_required=False,
+        dev_mode=True,
+    )
 
 
 class WorkflowEngineTests(unittest.TestCase):
@@ -101,7 +108,9 @@ class WorkflowEngineTests(unittest.TestCase):
         state, engine = self._run("今天天气怎么样？")
         self.assertTrue(state.refused)
         self.assertEqual(state.answer, nodes.NO_EVIDENCE_ANSWER)
-        self.assertEqual(state.retrieval_round, 2)
+        # P0-5 后：扩不出同义词时直接拒答，不再空跑第二轮召回（旧值是 2）
+        self.assertEqual(state.retrieval_round, 1)
+        self.assertTrue(state.expansion_exhausted, "无同义词可用时应标记扩展耗尽")
         self.assertIn("reject_handoff", engine.visited)
         self.assertNotIn("generate_answer", engine.visited)
 
@@ -112,7 +121,8 @@ class WorkflowEngineTests(unittest.TestCase):
         self.assertIn("expand_query", engine.visited)
         self.assertGreater(len(state.evidence), 0)
         self.assertFalse(state.refused)
-        self.assertIn("晚归", state.rewritten_query)
+        self.assertIn("晚归", state.retrieval_query)
+        self.assertNotIn("晚归", state.generation_query, "生成侧问题不应被扩展词污染")
 
     def test_grounding_regen_loop(self) -> None:
         """引用校验不通过 → 重新生成 → 仍不通过 → 降级（第二个循环）。"""
@@ -166,7 +176,7 @@ class WorkflowEngineTests(unittest.TestCase):
             ],
         )
         result = asyncio.run(nodes.verify_grounding(state, None))
-        self.assertTrue(result["grounding_ok"])
+        self.assertEqual(result["grounding_status"], "verified")
 
     def test_cache_clear(self) -> None:
         """缓存支持清空（上传/删除文档后调用，修复 #3）。"""
@@ -304,7 +314,10 @@ class AuthTests(unittest.TestCase):
 
     def _build_client(self, auth_required: bool = True) -> TestClient:
         settings = make_settings()
+        # auth_required 与 dev_mode 互斥：鉴权用例必须关掉 dev_mode，
+        # 否则匿名会被放进来，401 断言全部失效。
         settings.auth_required = auth_required
+        settings.dev_mode = not auth_required
         services = build_services(settings)
         services.llm = FakeLLM()
         return TestClient(create_app(settings, services=services))
