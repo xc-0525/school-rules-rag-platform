@@ -89,6 +89,11 @@ class Settings:
     max_tool_rounds: int = 2
     memory_window: int = 6
     evidence_threshold: float = 0.5
+    # ---- 证据充分性判定（拒答）----
+    # off：只用相似度阈值（旧行为）；auto：分数在灰区才调模型；always：每题都判
+    sufficiency_judge: str = "auto"
+    sufficiency_judge_low: float = 0.50   # 低于此分直接判不足，不调模型
+    sufficiency_judge_high: float = 0.78  # 高于此分直接放行，不调模型
     node_timeout: float = 120.0
 
     # ---- 检索融合（P1-3 / 质量闸门）----
@@ -163,6 +168,9 @@ class Settings:
             max_tool_rounds=_env_int("MAX_TOOL_ROUNDS", 2),
             memory_window=_env_int("MEMORY_WINDOW", 6),
             evidence_threshold=_env_float("EVIDENCE_THRESHOLD", 0.5),
+            sufficiency_judge=os.getenv("SUFFICIENCY_JUDGE", "auto").strip().lower(),
+            sufficiency_judge_low=_env_float("SUFFICIENCY_JUDGE_LOW", 0.50),
+            sufficiency_judge_high=_env_float("SUFFICIENCY_JUDGE_HIGH", 0.78),
             fusion_mode=os.getenv("FUSION_MODE", "append").strip().lower(),
             graph_quality_min_score=_env_float("GRAPH_QUALITY_MIN_SCORE", 0.55),
             graph_max_share=_env_float("GRAPH_MAX_SHARE", 0.5),

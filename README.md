@@ -443,6 +443,11 @@ SERVE_FRONTEND=1
 # 是否开放学生自助注册：1=开放（默认），0=关闭
 ALLOW_REGISTRATION=1
 
+# 证据充分性判定：off=只用阈值；auto=灰区调模型（默认）；always=每题都判
+SUFFICIENCY_JUDGE=auto
+SUFFICIENCY_JUDGE_LOW=0.50
+SUFFICIENCY_JUDGE_HIGH=0.78
+
 # Agent 的 Tool Calling / 多轮记忆参数
 MAX_TOOL_ROUNDS=2
 MEMORY_WINDOW=6
@@ -623,6 +628,10 @@ school-rules-rag-platform/
 - **融合策略（真实语料实测定标）**：默认 `FUSION_MODE=append`——向量决定排序，图谱只补充向量未命中的条款。
   20 题消融：仅向量 recall@3 0.800 / MRR 0.600；等权 RRF 0.850 / 0.454（排序被弱图谱拖累）；append **0.850 / 0.610**
 - **图谱不参与证据分**：`evidence_score` 只取向量 cosine，避免"关键词命中即判证据充分"导致拒答链路失效
+- **证据充分性判定（拒答）**：`check_sufficiency` 从空实现改为三态判定（sufficient / insufficient / skipped），
+  灰区才调模型（`SUFFICIENCY_JUDGE=auto`）。真实 24 题：拒答准确率 **0.833 → 1.000**、引用通过率 0.917 → 1.000，
+  p50 3.87→3.89s、p95 5.35→5.70s。背景：可答题最低向量分 0.567 与应拒答题最高 0.620 **区间重叠**，
+  单靠阈值必然同时误杀和漏放
 - **工单二次确认**：Agent 只生成草稿，用户在前端点"确认提交"后才通过 `POST /api/v1/tickets` 落库，同参数幂等
 - **上传链路去 base64（P2-11）**：新增 `upload-raw` 原始字节流通道，边收边落盘、累计超限即时 413 并清理半成品；前端不再 `FileReader → base64`（20MB PDF 峰值内存从约 100MB 降到约 1 倍文件大小）
 - **请求级 trace_id**：响应头回显 `X-Request-ID`，并写入每条应用日志与 `done` 事件，排查一次问答只需一个 id

@@ -111,10 +111,74 @@ async def retrieve_graph(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     paths = await ctx.services.graph.search_paths(_search_text(state), top_k=2)
     return {"graph_paths": paths}
 
-async def check_sufficiency(state: AgentState, ctx: NodeContext) -> dict[str, Any]:  # noqa: ARG001
-    # 判定逻辑本身在 graph.route_sufficiency 里；保留节点是为了在 SSE 轨迹上
-    # 显式展示"判定"这一步（论文里可写：路由决策在 route 函数，节点用于轨迹标记）。
-    return {}
+async def check_sufficiency(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
+    """判断召回条款是否真的能回答问题（拒答判定的核心）。
+
+    历史：这里曾是空实现，拒答完全依赖 evidence_score 与固定阈值。
+    真实语料实测定标后确认该做法不成立——可答题最低向量分 0.567、
+    应拒答题最高 0.620，两者区间重叠，阈值调到哪都会同时误杀和漏放。
+
+    现在输出三态，供 route_sufficiency 决策：
+    - sufficient  ：条款直接回答了问题（高置信度预筛通过，或模型判定通过）
+    - insufficient：只是沾边，或问题涉及的主体压根没出现在条款里
+    - skipped     ：判定关闭 / 调用失败，退回旧的阈值逻辑（宁可答也不误拒）
+
+    成本控制（auto 模式）：只有分数落在 [low, high) 灰区才真的调模型，
+    两端用阈值直接裁决，避免每次问答都多付一次调用。
+    """
+    if not state.evidence:
+        return {
+            "sufficiency_verdict": "insufficient",
+            "sufficiency_reason": "未召回任何条款",
+        }
+
+    mode = (ctx.settings.sufficiency_judge or "auto").lower()
+    score = state.evidence_score
+
+    if mode == "off":
+        return {
+            "sufficiency_verdict": "skipped",
+            "sufficiency_reason": "判定已关闭，按相似度阈值放行",
+        }
+    if mode == "auto":
+        high = ctx.settings.sufficiency_judge_high
+        low = ctx.settings.sufficiency_judge_low
+        if score >= high:
+            return {
+                "sufficiency_verdict": "sufficient",
+                "sufficiency_reason": f"向量分 {score:.2f} ≥ {high:.2f}，直接放行",
+            }
+        if score < low:
+            return {
+                "sufficiency_verdict": "insufficient",
+                "sufficiency_reason": f"向量分 {score:.2f} < {low:.2f}，未达最低相关度",
+            }
+
+    judge = getattr(ctx.services.llm, "judge_sufficiency", None)
+    if judge is None:
+        return {
+            "sufficiency_verdict": "skipped",
+            "sufficiency_reason": "当前模型不支持充分性判定",
+        }
+
+    payload = [
+        {"title": item.title, "detail": item.detail, "snippet": item.snippet}
+        for item in state.evidence[:4]
+    ]
+    try:
+        result = await judge(state.query, payload)
+    except Exception as exc:  # noqa: BLE001 —— 判定失败不能阻断问答
+        logger.warning("充分性判定失败，放行：%s", exc)
+        return {
+            "sufficiency_verdict": "skipped",
+            "sufficiency_reason": f"判定调用异常（{type(exc).__name__}），按阈值放行",
+        }
+
+    verdict = "sufficient" if result.get("sufficient") else "insufficient"
+    return {
+        "sufficiency_verdict": verdict,
+        "sufficiency_reason": str(result.get("reason") or "")[:120],
+    }
 
 async def expand_query(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     """用实体同义词 / 口语说法扩展检索串。

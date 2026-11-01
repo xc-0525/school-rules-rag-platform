@@ -37,10 +37,24 @@ def build_graph(settings: Settings) -> tuple[dict[str, NodeSpec], str]:
 
     def route_sufficiency(state) -> tuple[str | None, str]:
         score = state.evidence_score
+        reason = state.sufficiency_reason or "未判定"
+        # 模型明确判定"条款没回答问题"时，不再看相似度分数直接走扩展/拒答。
+        # 这一步是拒答准确率的关键：可答题与无关题的向量分区间重叠，
+        # 只看分数无法区分"语义相近"和"真的能答"。
+        if state.sufficiency_verdict == "insufficient":
+            if state.retrieval_round < settings.max_retrieval_rounds:
+                return (
+                    "expand_query",
+                    f"判定证据不足（{reason}），进入查询扩展第 {state.retrieval_round + 1} 轮",
+                )
+            return (
+                "reject_handoff",
+                f"判定证据不足且已扩展 {state.retrieval_round} 轮（{reason}），拒答并引导人工",
+            )
         if state.evidence and score >= settings.evidence_threshold:
             return (
                 "generate_answer",
-                f"证据分 {score:.2f} ≥ 阈值 {settings.evidence_threshold:.2f}，证据充分",
+                f"证据分 {score:.2f} ≥ 阈值 {settings.evidence_threshold:.2f}（{reason}），证据充分",
             )
         if state.retrieval_round < settings.max_retrieval_rounds:
             return (

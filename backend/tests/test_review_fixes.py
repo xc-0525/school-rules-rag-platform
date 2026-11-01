@@ -248,6 +248,99 @@ class FusionTests(unittest.TestCase):
         self.assertLess(order.index("知识图谱 · 《C》"), order.index("《B》"))
 
 
+class SufficiencyJudgeTests(unittest.TestCase):
+    """证据充分性判定：解决"可答题与无关题分数区间重叠"导致的拒答失效。"""
+
+    class _CountingLLM(FakeLLM):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.calls = 0
+
+        async def judge_sufficiency(self, question, evidence):
+            self.calls += 1
+            return await super().judge_sufficiency(question, evidence)
+
+    class _BrokenLLM(FakeLLM):
+        async def judge_sufficiency(self, question, evidence):
+            raise RuntimeError("judge boom")
+
+    @staticmethod
+    def _evidence(text: str = "第5条 宿舍楼晚上十一点锁门、熄灯") -> list[Evidence]:
+        return [Evidence(type="vector", title="《住宿规定》", detail="正文 · 第5条", snippet=text, score=0.6)]
+
+    def _run(self, settings, score: float, llm=None, evidence=None) -> dict:
+        services = build_services(settings)
+        services.llm = llm or FakeLLM()
+        state = AgentState(
+            query="校医院在哪儿？", evidence=evidence if evidence is not None else self._evidence(),
+            evidence_score=score,
+        )
+        ctx = NodeContext(services=services, settings=settings, bus=NullBus())
+        return asyncio.run(nodes.check_sufficiency(state, ctx))
+
+    def test_high_score_short_circuits_without_model(self) -> None:
+        llm = self._CountingLLM()
+        result = self._run(make_settings(), 0.90, llm)
+        self.assertEqual(result["sufficiency_verdict"], "sufficient")
+        self.assertEqual(llm.calls, 0, "高置信度不应调用模型")
+
+    def test_low_score_marks_insufficient_without_model(self) -> None:
+        llm = self._CountingLLM()
+        result = self._run(make_settings(), 0.40, llm)
+        self.assertEqual(result["sufficiency_verdict"], "insufficient")
+        self.assertEqual(llm.calls, 0, "低分不应调用模型")
+
+    def test_gray_zone_calls_model(self) -> None:
+        llm = self._CountingLLM(sufficiency=False, sufficiency_reason="条款未涉及校医院")
+        result = self._run(make_settings(), 0.60, llm)
+        self.assertEqual(llm.calls, 1, "灰区必须调用模型判定")
+        self.assertEqual(result["sufficiency_verdict"], "insufficient")
+        self.assertIn("校医院", result["sufficiency_reason"])
+
+    def test_no_evidence_is_insufficient(self) -> None:
+        result = self._run(make_settings(), 0.0, evidence=[])
+        self.assertEqual(result["sufficiency_verdict"], "insufficient")
+
+    def test_judge_exception_falls_back_to_skipped(self) -> None:
+        result = self._run(make_settings(), 0.60, self._BrokenLLM())
+        self.assertEqual(result["sufficiency_verdict"], "skipped", "判定失败不能误拒答")
+
+    def test_judge_off_keeps_old_behaviour(self) -> None:
+        llm = self._CountingLLM(sufficiency=False)
+        result = self._run(make_settings(sufficiency_judge="off"), 0.60, llm)
+        self.assertEqual(result["sufficiency_verdict"], "skipped")
+        self.assertEqual(llm.calls, 0)
+
+    def test_route_expands_then_rejects(self) -> None:
+        settings = make_settings(sufficiency_judge="auto", max_retrieval_rounds=2)
+        spec, _ = build_graph(settings)
+        route = spec["check_sufficiency"].route
+        self.assertIsNotNone(route, "充分性节点必须带路由决策")
+
+        base = AgentState(
+            query="校医院在哪儿？", evidence=self._evidence(), evidence_score=0.62,
+            sufficiency_verdict="insufficient", sufficiency_reason="条款未涉及校医院",
+        )
+        first, _ = route(base)
+        self.assertEqual(first, "expand_query", "首轮不足应尝试扩展")
+
+        exhausted = base.model_copy(update={"retrieval_round": 2})
+        final, reason = route(exhausted)
+        self.assertEqual(final, "reject_handoff", "扩展耗尽后应拒答")
+        self.assertIn("校医院", reason)
+
+    def test_route_generates_when_sufficient(self) -> None:
+        settings = make_settings()
+        spec, _ = build_graph(settings)
+        route = spec["check_sufficiency"].route
+        state = AgentState(
+            query="宿舍几点熄灯？", evidence=self._evidence(), evidence_score=0.75,
+            sufficiency_verdict="sufficient", sufficiency_reason="条款直接回答",
+        )
+        target, _ = route(state)
+        self.assertEqual(target, "generate_answer")
+
+
 class RateLimitTests(unittest.TestCase):
     def _client(self, **overrides) -> TestClient:
         settings = make_settings(**overrides)

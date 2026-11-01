@@ -94,6 +94,7 @@ flowchart TD
 | 图谱不参与证据分 | `_evidence_score` | `evidence_score` 只取向量 cosine；图谱分是按关键词覆盖率标定的代理值（真实语料下普遍 0.95），参与取最大值会让"证据充分"判定失效 |
 | 质量闸门 | `GRAPH_QUALITY_MIN_SCORE`（gated 模式） | 图谱最高分低于准入线时整路不参与融合，`evidence_meta.graph_gated=true` 留痕。注意：真实语料下图谱分普遍 0.95，闸门几乎不触发，故默认改用 append |
 | 占比上限 | `GRAPH_MAX_SHARE` | 最终证据中图谱条目不超过该比例，避免挤占 prompt |
+| 证据充分性判定 | `check_sufficiency` + `SUFFICIENCY_JUDGE` | 三态输出：`sufficient`（可答）、`insufficient`（条款只是沾边或主体未出现，走扩展→拒答）、`skipped`（判定关闭/失败，退回阈值）。`auto` 模式下只有分数落在 `[LOW, HIGH)` 才调模型，24 题实测约 19 次调用。真实数据：拒答准确率 0.833→1.000，p95 +0.35s |
 | 引用校验 | 三态 `verified / unverified / skipped` | 答案里出现的每个条款号都必须来自召回集（编造"第99条"直接不通过）；工具直答标 `skipped`，不写缓存、不计入引用通过率 |
 
 ## 4. Tool Calling 与多轮记忆

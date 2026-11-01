@@ -61,6 +61,9 @@ class AgentState(BaseModel):
     evidence: list[Evidence] = Field(default_factory=list)
     evidence_score: float = 0.0
     evidence_meta: dict[str, Any] = Field(default_factory=dict)
+    # 证据充分性判定：sufficient=可答；insufficient=条款没回答问题；skipped=未判定
+    sufficiency_verdict: str = ""
+    sufficiency_reason: str = ""
     sources: list[SourceItem] = Field(default_factory=list)
 
     # ---- 生成与校验 ----
