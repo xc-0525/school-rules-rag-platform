@@ -1,6 +1,15 @@
 <template>
-  <div class="agent-trace">
-    <div class="trace-head">
+  <div class="agent-trace" :class="{ 'is-collapsed': !expanded }">
+    <div
+      class="trace-head"
+      role="button"
+      tabindex="0"
+      :aria-expanded="expanded"
+      @click="toggle"
+      @keydown.enter.prevent="toggle"
+      @keydown.space.prevent="toggle"
+    >
+      <span class="trace-caret" :class="{ open: expanded }">▶</span>
       <span class="trace-title">Agent 执行轨迹</span>
       <el-tag size="small" type="info" effect="plain">{{ trace.length }} 条事件</el-tag>
       <el-tag v-if="runtime" size="small" effect="plain">步数 {{ runtime.steps }}</el-tag>
@@ -13,9 +22,11 @@
       <el-tag v-if="runtime?.tool_calls" size="small" type="success" effect="plain">
         工具调用 {{ runtime.tool_calls }} 次
       </el-tag>
+      <span class="trace-hint">{{ expanded ? '收起' : '展开' }}</span>
     </div>
 
-    <el-timeline class="trace-list">
+    <div v-show="expanded" class="trace-body">
+      <el-timeline class="trace-list">
       <el-timeline-item
         v-for="(item, index) in rendered"
         :key="index"
@@ -54,18 +65,26 @@
           </span>
         </div>
       </el-timeline-item>
-    </el-timeline>
+      </el-timeline>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { RuntimeInfo, TraceEvent } from '../types'
 
 const props = defineProps<{
   trace: TraceEvent[]
   runtime?: RuntimeInfo | null
 }>()
+
+// 默认收起：轨迹面板很长，展开会挤压正文。状态放在组件内，
+// 配合稳定的列表 key（message.clientId），流式更新或滚动都不会重置。
+const expanded = ref(false)
+const toggle = () => {
+  expanded.value = !expanded.value
+}
 
 interface RenderedItem {
   type: 'node' | 'route' | 'tool'

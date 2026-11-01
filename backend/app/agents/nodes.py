@@ -161,9 +161,14 @@ async def check_sufficiency(state: AgentState, ctx: NodeContext) -> dict[str, An
             "sufficiency_reason": "当前模型不支持充分性判定",
         }
 
+    # 判定候选不能按融合顺序截断：append 融合会保持检索顺序，首轮召回的
+    # 低质条款排在前面，真正能回答问题的条款可能在第 5 条之后（实测
+    # "考试带手机" 一题，41 号令第五十二条就因此被切掉，导致误拒答）。
+    # 这里按相关度取前 6 条交给判定。
+    candidates = sorted(state.evidence, key=lambda item: item.score, reverse=True)[:6]
     payload = [
         {"title": item.title, "detail": item.detail, "snippet": item.snippet}
-        for item in state.evidence[:4]
+        for item in candidates
     ]
     try:
         result = await judge(state.query, payload)

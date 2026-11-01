@@ -2,6 +2,10 @@ import { defineStore } from 'pinia'
 import type { Message, RuntimeInfo, SourceItem, TraceEvent } from '../types'
 import { fetchConversation } from '../api/client'
 
+// 单调递增的消息标识：仅用于列表 key，不参与后端交互
+let clientSeq = 0
+const nextClientId = () => `m${Date.now().toString(36)}-${++clientSeq}`
+
 export const useChatStore = defineStore('chat', {
   state: () => ({
     conversationId: null as number | null,
@@ -19,11 +23,15 @@ export const useChatStore = defineStore('chat', {
 
     loadMessages(conversationId: number, messages: Message[]) {
       this.conversationId = conversationId
-      this.messages = messages
+      // 历史消息也要有稳定标识，否则切换会话时折叠状态会串到别的消息上
+      this.messages = messages.map((message) => ({
+        ...message,
+        clientId: message.clientId ?? nextClientId(),
+      }))
     },
 
     addUserMessage(content: string) {
-      this.messages.push({ role: 'user', content })
+      this.messages.push({ role: 'user', content, clientId: nextClientId() })
     },
 
     addAssistantPlaceholder(): number {
@@ -33,6 +41,7 @@ export const useChatStore = defineStore('chat', {
         sources: [],
         trace: [],
         pending: true,
+        clientId: nextClientId(),
       })
       return this.messages.length - 1
     },

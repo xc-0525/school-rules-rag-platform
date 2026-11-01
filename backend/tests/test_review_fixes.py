@@ -297,6 +297,29 @@ class SufficiencyJudgeTests(unittest.TestCase):
         self.assertEqual(result["sufficiency_verdict"], "insufficient")
         self.assertIn("校医院", result["sufficiency_reason"])
 
+    def test_judge_sees_top_six_by_score(self) -> None:
+        """关键条款排在第 5 位时也必须进入判定视野。
+
+        回归：曾按融合顺序只取前 4 条，"考试带手机"一题里 41 号令第五十二条
+        （明确列出使用通讯设备作弊的处分）排在第 5 位被切掉，导致误拒答。
+        """
+        llm = self._CountingLLM(sufficiency=True)
+        seen: dict[str, int] = {}
+
+        async def spy(question, evidence):
+            seen["count"] = len(evidence)
+            seen["top"] = evidence[0]["detail"]
+            return {"sufficient": True, "reason": "spy"}
+
+        llm.judge_sufficiency = spy
+        evidence = [
+            self._evidence(f"内容{i}")[0].model_copy(update={"detail": f"第{i}条", "score": 0.90 - i * 0.01})
+            for i in range(8)
+        ]
+        self._run(make_settings(), 0.60, llm, evidence=evidence)
+        self.assertEqual(seen["count"], 6, "判定应拿到 6 条候选，而不是融合顺序前 4 条")
+        self.assertEqual(seen["top"], "第0条", "候选应按相关度从高到低排序")
+
     def test_no_evidence_is_insufficient(self) -> None:
         result = self._run(make_settings(), 0.0, evidence=[])
         self.assertEqual(result["sufficiency_verdict"], "insufficient")

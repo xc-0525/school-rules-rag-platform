@@ -30,7 +30,7 @@
 
       <MessageBubble
         v-for="(message, index) in store.messages"
-        :key="index"
+        :key="message.clientId ?? index"
         :message="message"
         @feedback="(rating) => onFeedback(message, rating)"
         @confirm-ticket="(draft) => onConfirmTicket(index, draft)"

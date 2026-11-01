@@ -73,6 +73,8 @@ export interface ChatDonePayload {
 }
 
 export interface Message {
+  /** 前端稳定标识：从创建起不变，用作列表 key，避免索引复用导致组件状态串位 */
+  clientId?: string
   id?: number
   role: 'user' | 'assistant' | 'system'
   content: string

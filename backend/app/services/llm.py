@@ -148,10 +148,10 @@ class DeepSeekLLM:
             return {"sufficient": False, "reason": "未召回任何条款"}
 
         blocks = []
-        for index, item in enumerate(evidence[:4], start=1):
+        for index, item in enumerate(evidence[:6], start=1):
             text = (item.get("snippet") or "").strip().replace("\n", " ")
             blocks.append(
-                f"[{index}] {item.get('detail') or item.get('title') or ''}\n{text[:280]}"
+                f"[{index}] {item.get('detail') or item.get('title') or ''}\n{text[:200]}"
             )
         messages = [
             {
@@ -159,8 +159,8 @@ class DeepSeekLLM:
                 "content": (
                     "你是校规问答系统的证据审核员。判断下面这些条款能否回答学生的问题。\n"
                     "判定标准：\n"
-                    "1. 只有条款内容**直接回答了问题**才算 sufficient；\n"
-                    "2. 只是出现相关词汇、但没有给出答案的，判 insufficient；\n"
+                    "1. 条款直接回答，或明确列出了相关问题对应的处理规定，判 sufficient；\n"
+                    "2. 只是出现相关词汇、但没有给出任何处理方式或结论的，判 insufficient；\n"
                     "3. 问题涉及的主体（如食堂、校医院、校车、快递、停车）在条款中"
                     "完全没有出现的，判 insufficient；\n"
                     "4. 不要用你自己的知识补充，只依据给出的条款。\n"
