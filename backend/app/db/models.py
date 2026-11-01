@@ -120,6 +120,9 @@ class Announcement(Base):
     category: Mapped[str] = mapped_column(String(32), default="other")
     effective_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # normal=普通；urgent=紧急。urgent 且置顶时在学生端顶部横幅展示
+    # （见 sql/migrations/003_notice_priority.sql）
+    priority: Mapped[str] = mapped_column(String(16), default="normal")
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

@@ -30,6 +30,16 @@ NOTICE_CATEGORIES: dict[str, str] = {
 
 DEFAULT_CATEGORY = "other"
 
+# 紧急级别：只有 urgent + 置顶的公告才会挂到学生端顶部横幅。
+PRIORITY_NORMAL = "normal"
+PRIORITY_URGENT = "urgent"
+NOTICE_PRIORITIES = (PRIORITY_NORMAL, PRIORITY_URGENT)
+
+
+def normalize_priority(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in NOTICE_PRIORITIES else PRIORITY_NORMAL
+
 
 def category_label(code: str | None) -> str:
     return NOTICE_CATEGORIES.get((code or "").strip().lower(), NOTICE_CATEGORIES[DEFAULT_CATEGORY])
@@ -123,6 +133,8 @@ def _decorate(row: dict[str, Any]) -> dict[str, Any]:
     item["category_label"] = category_label(item.get("category"))
     item["is_expired"] = _is_expired(item)
     item["is_pinned"] = bool(item.get("is_pinned"))
+    item["priority"] = normalize_priority(item.get("priority"))
+    item["is_urgent"] = item["priority"] == PRIORITY_URGENT
     for key in ("effective_at", "expires_at", "created_at", "updated_at"):
         if key in item:
             item[key] = _fmt(item[key])
@@ -193,6 +205,7 @@ def list_notices(
                         "content": notice.content,
                         "category": notice.category,
                         "is_pinned": notice.is_pinned,
+                        "priority": notice.priority,
                         "status": notice.status,
                         "publisher": username or "",
                         "user_id": notice.user_id,
@@ -253,6 +266,7 @@ def get_notice(settings: Settings, notice_id: int) -> dict[str, Any] | None:
                 "content": notice.content,
                 "category": notice.category,
                 "is_pinned": notice.is_pinned,
+                "priority": notice.priority,
                 "status": notice.status,
                 "publisher": username or "",
                 "user_id": notice.user_id,
@@ -274,7 +288,11 @@ def create_notice(settings: Settings, user_id: int, payload: dict[str, Any]) -> 
     if category not in NOTICE_CATEGORIES:
         category = DEFAULT_CATEGORY
     status = "published" if str(payload.get("status") or "published") == "published" else "draft"
+    priority = normalize_priority(payload.get("priority"))
     is_pinned = bool(payload.get("is_pinned"))
+    if priority == PRIORITY_URGENT:
+        # 紧急公告必须置顶：横幅与列表排序依赖 is_pinned，避免两个开关打架
+        is_pinned = True
     effective_at = _parse_dt(payload.get("effective_at")) or datetime.now()
     expires_at = _parse_dt(payload.get("expires_at"))
     if expires_at and expires_at <= effective_at:
@@ -291,6 +309,7 @@ def create_notice(settings: Settings, user_id: int, payload: dict[str, Any]) -> 
                 "content": content,
                 "category": category,
                 "is_pinned": is_pinned,
+                "priority": priority,
                 "status": status,
                 "publisher": "admin",
                 "user_id": user_id,
@@ -312,6 +331,7 @@ def create_notice(settings: Settings, user_id: int, payload: dict[str, Any]) -> 
             content=content,
             category=category,
             is_pinned=1 if is_pinned else 0,
+            priority=priority,
             status=status,
             effective_at=effective_at,
             expires_at=expires_at,
@@ -325,6 +345,8 @@ def create_notice(settings: Settings, user_id: int, payload: dict[str, Any]) -> 
             "category": category,
             "category_label": category_label(category),
             "is_pinned": is_pinned,
+            "priority": priority,
+            "is_urgent": priority == PRIORITY_URGENT,
             "status": status,
             "publisher": "",
             "user_id": user_id,
@@ -342,9 +364,17 @@ def update_notice(
     """编辑 / 上下架。只更新 payload 里显式给出的字段。"""
     fields = {
         key: payload[key]
-        for key in ("title", "content", "category", "is_pinned", "status", "effective_at", "expires_at")
+        for key in ("title", "content", "category", "is_pinned", "priority", "status", "effective_at", "expires_at")
         if key in payload
     }
+
+    def _apply_priority(row: dict[str, Any]) -> None:
+        """紧急级别与置顶联动：改成 urgent 自动置顶，改回 normal 不动置顶开关。"""
+        if "priority" not in fields:
+            return
+        row["priority"] = normalize_priority(fields["priority"])
+        if row["priority"] == PRIORITY_URGENT:
+            row["is_pinned"] = True
 
     if not settings.mysql_url:
         with _mock_lock:
@@ -360,6 +390,7 @@ def update_notice(
                     row[key] = str(fields[key]).strip()
             if "is_pinned" in fields:
                 row["is_pinned"] = bool(fields["is_pinned"])
+            _apply_priority(row)
             if "effective_at" in fields:
                 row["effective_at"] = _parse_dt(fields["effective_at"])
             if "expires_at" in fields:
@@ -383,6 +414,10 @@ def update_notice(
             notice.category = category if category in NOTICE_CATEGORIES else DEFAULT_CATEGORY
         if "is_pinned" in fields:
             notice.is_pinned = 1 if fields["is_pinned"] else 0
+        if "priority" in fields:
+            notice.priority = normalize_priority(fields["priority"])
+            if notice.priority == PRIORITY_URGENT:
+                notice.is_pinned = 1
         if "status" in fields:
             notice.status = "published" if fields["status"] == "published" else "draft"
         if "effective_at" in fields:
@@ -413,6 +448,29 @@ def delete_notice(settings: Settings, notice_id: int) -> bool:
         session.delete(notice)
         session.commit()
         return True
+
+
+def list_banner_notices(settings: Settings, limit: int = 3) -> list[dict[str, Any]]:
+    """学生端顶部横幅：紧急 + 置顶 + 已发布 + 生效中。
+
+    复用 list_notices 的过滤（草稿/过期已被剔除），这里只补紧急与置顶判定，
+    避免"页面横幅"与"公告列表"口径不一致。
+    """
+    limit = max(1, min(int(limit or 3), 5))
+    rows = list_notices(settings, limit=200)
+    now = datetime.now()
+    result = []
+    for row in rows:
+        if not row.get("is_pinned") or normalize_priority(row.get("priority")) != PRIORITY_URGENT:
+            continue
+        # list_notices 只过滤了过期，未到生效时间的还要在这里补一道
+        effective = _parse_dt(row.get("effective_at"))
+        if effective and effective > now:
+            continue
+        result.append(row)
+        if len(result) >= limit:
+            break
+    return result
 
 
 def search_notices(settings: Settings, keyword: str = "", limit: int = 5) -> list[dict[str, Any]]:

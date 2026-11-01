@@ -1,5 +1,5 @@
 <template>
-  <div class="panel panel-pad" style="height: calc(100vh - 60px - 36px); overflow-y: auto">
+  <div class="panel panel-pad" style="height: 100%; overflow-y: auto">
     <div class="detail-head">
       <div>
         <div class="panel-title" style="margin-bottom: 4px">校园服务文档管理</div>

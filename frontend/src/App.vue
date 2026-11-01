@@ -69,6 +69,8 @@
         </div>
       </el-header>
 
+      <NoticeBanner />
+
       <el-main class="app-main">
         <router-view />
       </el-main>
@@ -80,6 +82,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Bell, ChatDotRound, Clock, Document, InfoFilled } from '@element-plus/icons-vue'
+import NoticeBanner from './components/NoticeBanner.vue'
 import { fetchHealth } from './api/client'
 import { useAuthStore } from './stores/auth'
 import type { HealthInfo } from './types'

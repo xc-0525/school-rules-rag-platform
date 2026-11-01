@@ -55,6 +55,14 @@ def build_router(settings: Settings) -> APIRouter:
             for code, label in notice_service.NOTICE_CATEGORIES.items()
         ]
 
+    @router.get("/notices/banner", response_model=list[NoticeItem], summary="顶部紧急公告横幅")
+    async def banner_notices_api(
+        limit: int = Query(default=3, ge=1, le=5, description="最多返回几条"),
+        user: AuthUser = Depends(current_user),  # noqa: ARG001
+    ):
+        # 必须声明在 /notices/{notice_id} 之前，否则 "banner" 会被当成 notice_id 报 422
+        return await asyncio.to_thread(notice_service.list_banner_notices, settings, limit)
+
     @router.get("/notices/{notice_id}", response_model=NoticeItem, summary="公告详情")
     async def get_notice_api(notice_id: int, user: AuthUser = Depends(current_user)):
         notice = await asyncio.to_thread(notice_service.get_notice, settings, notice_id)

@@ -134,6 +134,11 @@ export function fetchNoticeCategories(): Promise<NoticeCategoryOption[]> {
   return request<NoticeCategoryOption[]>('/api/v1/notices/meta/categories')
 }
 
+/** 顶部紧急横幅：urgent + 置顶 + 生效中的公告 */
+export function fetchBannerNotices(limit = 3): Promise<NoticeItem[]> {
+  return request<NoticeItem[]>(`/api/v1/notices/banner?limit=${limit}`)
+}
+
 export function createNotice(payload: Record<string, unknown>): Promise<NoticeItem> {
   return request<NoticeItem>('/api/v1/notices', {
     method: 'POST',

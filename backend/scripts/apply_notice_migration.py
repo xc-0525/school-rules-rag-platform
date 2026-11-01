@@ -26,10 +26,15 @@ COLUMNS: list[tuple[str, str]] = [
     ("category", "ALTER TABLE announcements ADD COLUMN category VARCHAR(32) NOT NULL DEFAULT 'other' COMMENT '分类：water/power/network/teaching/life/other'"),
     ("effective_at", "ALTER TABLE announcements ADD COLUMN effective_at DATETIME NULL DEFAULT NULL COMMENT '生效时间'"),
     ("expires_at", "ALTER TABLE announcements ADD COLUMN expires_at DATETIME NULL DEFAULT NULL COMMENT '失效时间，NULL=长期有效'"),
+    ("priority", "ALTER TABLE announcements ADD COLUMN priority VARCHAR(16) NOT NULL DEFAULT 'normal' COMMENT 'normal=普通；urgent=紧急（登录后顶部横幅）'"),
 ]
 
 INDEXES: list[tuple[str, str]] = [
     ("idx_ann_time", "ALTER TABLE announcements ADD KEY idx_ann_time (expires_at, effective_at)"),
+    (
+        "idx_ann_banner",
+        "ALTER TABLE announcements ADD KEY idx_ann_banner (priority, is_pinned, status, expires_at)",
+    ),
 ]
 
 
@@ -73,18 +78,18 @@ def main() -> int:
                 print(f"  新增 {name}")
                 changed += 1
 
-            cursor.execute(
-                "SELECT INDEX_NAME FROM information_schema.STATISTICS "
-                "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='announcements' AND INDEX_NAME=%s",
-                (database, "idx_ann_time"),
-            )
-            if cursor.fetchone() is None:
-                for _, ddl in INDEXES:
-                    cursor.execute(ddl)
-                print("  新增索引 idx_ann_time")
+            for name, ddl in INDEXES:
+                cursor.execute(
+                    "SELECT INDEX_NAME FROM information_schema.STATISTICS "
+                    "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='announcements' AND INDEX_NAME=%s",
+                    (database, name),
+                )
+                if cursor.fetchone() is not None:
+                    print(f"  跳过索引 {name}（已存在）")
+                    continue
+                cursor.execute(ddl)
+                print(f"  新增索引 {name}")
                 changed += 1
-            else:
-                print("  跳过索引 idx_ann_time（已存在）")
 
             # 历史数据回填生效时间
             cursor.execute(
@@ -92,6 +97,15 @@ def main() -> int:
             )
             if cursor.rowcount:
                 print(f"  回填 {cursor.rowcount} 条历史公告的生效时间")
+                changed += 1
+
+            # 存量公告一律保持普通级别，避免升级后突然弹横幅
+            cursor.execute(
+                "UPDATE announcements SET priority = 'normal' "
+                "WHERE priority IS NULL OR priority = ''"
+            )
+            if cursor.rowcount:
+                print(f"  回填 {cursor.rowcount} 条历史公告的优先级")
                 changed += 1
         connection.commit()
     finally:

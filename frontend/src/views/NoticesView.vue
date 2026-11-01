@@ -1,5 +1,5 @@
 <template>
-  <div class="panel panel-pad" style="height: calc(100vh - 60px - 36px); overflow-y: auto">
+  <div class="panel panel-pad" style="height: 100%; overflow-y: auto">
     <div class="detail-head">
       <div>
         <div class="panel-title" style="margin-bottom: 4px">校园公告</div>
@@ -32,18 +32,24 @@
       <el-checkbox v-if="auth.isAdmin" v-model="includeExpired" @change="load">
         显示已结束
       </el-checkbox>
+      <span v-if="hiddenCount > 0" class="restore-dismissed">
+        已隐藏 {{ hiddenCount }} 条紧急提示
+        <el-button link type="primary" size="small" @click="restoreDismissed">恢复显示</el-button>
+      </span>
     </div>
 
     <el-empty v-if="!loading && !notices.length" description="暂无公告" />
 
     <div
       v-for="item in notices"
+      :id="`notice-${item.id}`"
       :key="item.id"
       class="notice-card"
-      :class="{ 'is-expired': item.is_expired }"
+      :class="{ 'is-expired': item.is_expired, 'is-urgent': item.is_urgent, 'is-focus': item.id === focusId }"
     >
       <div class="notice-head">
-        <el-tag v-if="item.is_pinned" type="danger" effect="plain" size="small">置顶</el-tag>
+        <el-tag v-if="item.is_urgent" type="danger" effect="dark" size="small">紧急</el-tag>
+        <el-tag v-else-if="item.is_pinned" type="danger" effect="plain" size="small">置顶</el-tag>
         <el-tag size="small" effect="plain" type="primary">{{ item.category_label }}</el-tag>
         <el-tag v-if="item.status === 'draft'" size="small" type="info" effect="plain">草稿</el-tag>
         <el-tag v-if="item.is_expired" size="small" type="info" effect="plain">已结束</el-tag>
@@ -104,6 +110,12 @@
         <el-form-item label="置顶">
           <el-switch v-model="form.is_pinned" />
         </el-form-item>
+        <el-form-item label="紧急横幅">
+          <el-switch v-model="form.priority" active-value="urgent" inactive-value="normal" />
+          <span class="muted" style="font-size: 12px; margin-left: 8px">
+            开启后学生登录后顶部悬挂提示，可点 × 关闭；自动置顶
+          </span>
+        </el-form-item>
         <el-form-item label="立即发布">
           <el-switch v-model="form.published" />
           <span class="muted" style="font-size: 12px; margin-left: 8px">关闭则保存为草稿</span>
@@ -118,7 +130,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   createNotice,
@@ -128,8 +141,10 @@ import {
   updateNotice,
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { clearDismissedNotices, loadDismissedNotices } from '../utils/noticeBanner'
 import type { NoticeCategoryOption, NoticeItem } from '../types'
 
+const route = useRoute()
 const auth = useAuthStore()
 const notices = ref<NoticeItem[]>([])
 const categories = ref<NoticeCategoryOption[]>([])
@@ -140,12 +155,17 @@ const loading = ref(false)
 const saving = ref(false)
 const editorVisible = ref(false)
 const editing = ref<NoticeItem | null>(null)
+/** 从横幅"查看公告"跳来时，高亮目标卡片 */
+const focusId = ref<number | null>(null)
+/** 被学生点 × 隐藏的紧急提示条数 */
+const hiddenCount = ref(0)
 
 const emptyForm = () => ({
   title: '',
   content: '',
   category: 'other',
   is_pinned: false,
+  priority: 'normal' as 'normal' | 'urgent',
   published: true,
   effective_at: '',
   expires_at: '',
@@ -160,11 +180,26 @@ async function load() {
       keyword: keyword.value.trim(),
       include_expired: includeExpired.value,
     })
+    await scrollToFocus()
   } catch (error: any) {
     ElMessage.error(`加载公告失败：${error?.message || error}`)
   } finally {
     loading.value = false
   }
+}
+
+async function scrollToFocus() {
+  if (!focusId.value) return
+  await nextTick()
+  const target = document.getElementById(`notice-${focusId.value}`)
+  target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function restoreDismissed() {
+  hiddenCount.value = clearDismissedNotices()
+  // 通知顶部横幅组件重新读取关闭记录
+  window.dispatchEvent(new CustomEvent('notice-banner:restore'))
+  ElMessage.success('已恢复显示紧急提示')
 }
 
 async function loadCategories() {
@@ -183,6 +218,7 @@ function openEditor(item?: NoticeItem) {
         content: item.content,
         category: item.category,
         is_pinned: item.is_pinned,
+        priority: item.priority || 'normal',
         published: item.status === 'published',
         effective_at: item.effective_at || '',
         expires_at: item.expires_at || '',
@@ -201,6 +237,7 @@ async function save() {
     content: form.value.content.trim(),
     category: form.value.category,
     is_pinned: form.value.is_pinned,
+    priority: form.value.priority,
     status: form.value.published ? 'published' : 'draft',
   }
   // 留空表示"立即生效 / 长期有效"，不要传空串给后端
@@ -241,6 +278,9 @@ async function remove(item: NoticeItem) {
 }
 
 onMounted(() => {
+  const focus = Number(route.query.focus)
+  if (Number.isInteger(focus) && focus > 0) focusId.value = focus
+  hiddenCount.value = loadDismissedNotices().length
   loadCategories()
   load()
 })

@@ -104,6 +104,58 @@ class NoticeServiceTests(unittest.TestCase):
         hits = notice_service.search_notices(self.settings, keyword="草稿公告")
         self.assertEqual(hits, [], "问答检索不应看到草稿")
 
+    # ---------------- 紧急横幅 ----------------
+
+    def test_banner_only_returns_urgent_pinned(self) -> None:
+        self._create(title="普通公告")
+        self._create(title="置顶但不紧急", is_pinned=True)
+        self._create(title="紧急停水通知", priority="urgent")
+        banners = notice_service.list_banner_notices(self.settings)
+        titles = [item["title"] for item in banners]
+        self.assertEqual(titles, ["紧急停水通知"], "横幅只收 urgent + 置顶")
+        self.assertTrue(banners[0]["is_pinned"], "urgent 创建时自动置顶")
+        self.assertTrue(banners[0]["is_urgent"])
+
+    def test_banner_hides_expired_and_draft(self) -> None:
+        now = datetime.now()
+        self._create(
+            title="已结束的紧急通知",
+            priority="urgent",
+            effective_at=now - timedelta(days=2),
+            expires_at=now - timedelta(days=1),
+        )
+        self._create(title="草稿紧急通知", priority="urgent", status="draft")
+        self.assertEqual(
+            notice_service.list_banner_notices(self.settings),
+            [],
+            "过期与草稿的紧急公告都不应上横幅",
+        )
+
+    def test_banner_hides_not_yet_effective(self) -> None:
+        now = datetime.now()
+        self._create(
+            title="明天才开始生效的紧急通知",
+            priority="urgent",
+            effective_at=now + timedelta(days=1),
+        )
+        self.assertEqual(notice_service.list_banner_notices(self.settings), [])
+
+    def test_urgent_update_downgrade_keeps_pinned(self) -> None:
+        created = self._create(title="紧急通知", priority="urgent")
+        updated = notice_service.update_notice(
+            self.settings, created["id"], {"priority": "normal"}
+        )
+        self.assertEqual(updated["priority"], "normal")
+        self.assertFalse(updated["is_urgent"])
+        # 降级不强制取消置顶，由管理员自行决定
+        self.assertTrue(updated["is_pinned"])
+
+    def test_normal_priority_default(self) -> None:
+        created = self._create()
+        self.assertEqual(created["priority"], "normal")
+        self.assertFalse(created["is_urgent"])
+        self.assertEqual(notice_service.list_banner_notices(self.settings), [])
+
 
 class NoticeApiTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -169,9 +221,41 @@ class NoticeApiTests(unittest.TestCase):
         self.assertIn("water", codes)
         self.assertIn("power", codes)
 
+    def test_banner_endpoint(self) -> None:
+        client, _ = self._client()
+        admin = {"Authorization": f"Bearer {token_for(1, 'admin', 'admin')}"}
+        student = {"Authorization": f"Bearer {token_for(2, 'student', 'student')}"}
+
+        created = client.post(
+            "/api/v1/notices",
+            json={
+                "title": "紧急停水",
+                "content": "今晚 22:00 起停水。",
+                "category": "water",
+                "priority": "urgent",
+            },
+            headers=admin,
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertTrue(created.json()["is_pinned"], "urgent 应自动置顶")
+
+        banners = client.get("/api/v1/notices/banner", headers=student)
+        self.assertEqual(banners.status_code, 200, banners.text)
+        titles = [item["title"] for item in banners.json()]
+        self.assertIn("紧急停水", titles)
+
+        # 学生能看到横幅但不能管理
+        forbidden = client.post(
+            "/api/v1/notices",
+            json={"title": "x", "content": "y", "priority": "urgent"},
+            headers=student,
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
     def test_requires_login(self) -> None:
         client, _ = self._client()
         self.assertEqual(client.get("/api/v1/notices").status_code, 401)
+        self.assertEqual(client.get("/api/v1/notices/banner").status_code, 401)
 
 
 if __name__ == "__main__":

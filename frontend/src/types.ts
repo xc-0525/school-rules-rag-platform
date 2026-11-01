@@ -103,6 +103,8 @@ export interface NoticeItem {
   category: string
   category_label: string
   is_pinned: boolean
+  priority: 'normal' | 'urgent'
+  is_urgent: boolean
   status: string
   publisher: string
   effective_at: string | null
