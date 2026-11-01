@@ -44,7 +44,13 @@
     <el-table v-loading="loading" :data="documents" stripe style="width: 100%">
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="title" label="标题" min-width="220" show-overflow-tooltip />
-      <el-table-column prop="file_name" label="文件名" min-width="180" show-overflow-tooltip />
+      <el-table-column prop="file_name" label="文件名（点击预览）" min-width="200" show-overflow-tooltip>
+        <template #default="{ row }">
+          <el-link type="primary" :underline="false" @click="preview(row)">
+            {{ row.file_name }}
+          </el-link>
+        </template>
+      </el-table-column>
       <el-table-column prop="file_type" label="类型" width="90">
         <template #default="{ row }">
           <el-tag size="small" effect="plain">{{ (row.file_type || '').toUpperCase() }}</el-tag>
@@ -76,7 +82,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { deleteDocument, fetchDocuments, uploadDocumentRaw } from '../api/client'
+import { deleteDocument, fetchDocumentPreviewUrl, fetchDocuments, uploadDocumentRaw } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { DocumentItem } from '../types'
 
@@ -154,6 +160,31 @@ async function load() {
     ElMessage.error(`加载文档失败：${error?.message || error}`)
   } finally {
     loading.value = false
+  }
+}
+
+/** 在线预览原件：fetch 带 token 拉字节流 → objectURL 新窗口打开（只读） */
+const previewingId = ref(0)
+async function preview(row: DocumentItem) {
+  if (previewingId.value) return
+  previewingId.value = row.id
+  try {
+    const url = await fetchDocumentPreviewUrl(row.id)
+    window.open(url, '_blank', 'noopener')
+    // 延迟回收，给新窗口加载留时间
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (error: any) {
+    if (error?.unsupported) {
+      ElMessageBox.alert(
+        `「${row.file_name}」为 ${error.suffix || '该'} 类型，浏览器无法内嵌预览，请下载后查看。`,
+        '暂不支持在线预览',
+        { type: 'info' },
+      )
+    } else {
+      ElMessage.error(`预览失败：${error?.message || error}`)
+    }
+  } finally {
+    previewingId.value = 0
   }
 }
 

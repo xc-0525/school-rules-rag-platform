@@ -30,6 +30,12 @@ const router = createRouter({
       meta: { title: '校园公告' },
     },
     {
+      path: '/services',
+      name: 'services',
+      component: () => import('../views/ServicesView.vue'),
+      meta: { title: '校园服务' },
+    },
+    {
       path: '/documents',
       name: 'documents',
       component: () => import('../views/DocumentsView.vue'),

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 
 from app.core.config import BASE_DIR, Settings
@@ -393,10 +394,80 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         )
 
     # ---------------- 列表 / 详情 / 删除 ----------------
-    @router.get("/documents", response_model=list[DocumentItem], summary="文档列表")
+    @router.get(
+        "/documents",
+        response_model=list[DocumentItem],
+        summary="文档列表",
+    )
     async def list_documents(user: AuthUser = Depends(current_user)):
         require_mysql()
         return await asyncio.to_thread(_list_documents_sync, settings.mysql_url)
+
+    @router.get(
+        "/documents/{document_id}/preview",
+        summary="在线预览原件（只读，学生与管理员均可）",
+        responses={415: {"description": "该文件类型不支持浏览器内嵌预览"}},
+    )
+    async def preview_document(document_id: int, user: AuthUser = Depends(current_user)):  # noqa: ARG001
+        """只读预览：登录用户即可访问，不做管理员限制。
+
+        支持类型：PDF / 图片（png/jpg/webp/gif）/ 文本（txt/md）浏览器原生渲染；
+        Office 文档（doc/docx/xls 等）浏览器无法原生渲染，返回 415 由前端提示下载。
+        安全校验：file_path 必须仍位于上传目录内（防数据库记录被篡改后目录穿越）。
+        """
+        require_mysql()
+        data = await asyncio.to_thread(_get_document_sync, settings.mysql_url, document_id)
+        if data is None:
+            raise HTTPException(status_code=404, detail="文档不存在")
+
+        path = Path(data["file_path"])
+        # 目录穿越防御：即使 DB 里的 file_path 被改过，也只允许读可信根目录内的文件
+        # （data/uploads=用户上传；<项目>/rules=抓取语料入库时登记的原始路径）
+        allowed_roots = [UPLOAD_DIR.resolve(), (BASE_DIR.parent / "rules").resolve()]
+        resolved = path.resolve()
+        if not any(resolved.is_relative_to(root) for root in allowed_roots):
+            raise HTTPException(status_code=400, detail="文件路径不合法")
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="原件文件已不存在（可能被清理）")
+
+        suffix = path.suffix.lower()
+        inline_types = {
+            ".pdf": "application/pdf",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+            ".txt": "text/plain",
+            ".md": "text/markdown",
+        }
+        media_type = inline_types.get(suffix)
+        if media_type is None:
+            raise HTTPException(
+                status_code=415,
+                detail={
+                    "message": f".{suffix} 类型暂不支持在线预览，请下载后查看",
+                    "suffix": suffix,
+                },
+            )
+        if media_type.endswith(("plain", "markdown")):
+            media_type += "; charset=utf-8"
+
+        from urllib.parse import quote
+
+        utf8_name = quote(Path(data["file_name"]).name)
+        ascii_fallback = "preview" + suffix
+        return FileResponse(
+            path,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": (
+                    f"inline; filename=\"{ascii_fallback}\"; filename*=UTF-8''{utf8_name}"
+                ),
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, max-age=3600",
+            },
+        )
 
     @router.get(
         "/documents/{document_id}",

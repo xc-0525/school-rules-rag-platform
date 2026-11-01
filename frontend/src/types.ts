@@ -183,3 +183,80 @@ export interface UploadResult {
   status: string
   message: string
 }
+
+// ---------------- 校园服务：报修 / 预约 / 失物招领 ----------------
+
+export interface RepairItem {
+  id: number
+  user_id: number
+  title: string
+  description: string
+  category: string
+  category_label: string
+  building: string
+  room: string
+  contact: string
+  status: 'pending' | 'processing' | 'completed' | 'closed'
+  handler_id: number | null
+  handler_remark: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface LocationItem {
+  id: number
+  name: string
+  zone: string
+  capacity: number
+  is_active: boolean
+}
+
+export interface SlotAvailability {
+  slot: string
+  label: string
+  booked: boolean
+}
+
+export interface AvailabilityInfo {
+  location_id: number
+  date: string
+  slots: SlotAvailability[]
+  range_note: string
+}
+
+export interface ReservationItem {
+  id: number
+  location_id: number
+  location_name: string
+  location_zone: string
+  user_id: number
+  res_date: string
+  slot: string
+  slot_label: string
+  status: 'reserved' | 'cancelled' | 'fulfilled' | 'no_show'
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface LostFoundItem {
+  id: number
+  user_id: number
+  kind: 'lost' | 'found'
+  kind_label: string
+  title: string
+  description: string
+  location: string
+  contact: string
+  images: string[]
+  status: 'pending_review' | 'published' | 'rejected' | 'resolved' | 'removed'
+  review_remark: string | null
+  reviewed_at: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface UploadedImage {
+  url: string
+  size_bytes: number
+  content_type: string
+}
