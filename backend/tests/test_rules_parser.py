@@ -12,7 +12,8 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.services.rules_parser import load_documents, parse_file, parse_text  # noqa: E402
 
-SAMPLE_DOC = BACKEND_DIR.parent / "rules" / "学生手册节选.md"
+# 虚构样例已隔离到 rules/_sample/（真实语料在 rules/wut/）
+SAMPLE_DOC = BACKEND_DIR.parent / "rules" / "_sample" / "学生手册节选.md"
 
 
 class RulesParserTests(unittest.TestCase):
@@ -39,10 +40,20 @@ class RulesParserTests(unittest.TestCase):
         self.assertEqual(document.chunks[0].chapter, "第一章 总则")
 
     def test_load_documents_skips_readme(self) -> None:
-        documents = load_documents(BACKEND_DIR.parent / "rules")
+        documents = load_documents(BACKEND_DIR.parent / "rules" / "_sample")
         names = [document.file_name for document in documents]
         self.assertNotIn("README.md", names)
         self.assertTrue(any(name.endswith(".md") for name in names))
+
+    def test_real_corpus_parses_into_articles(self) -> None:
+        """真实语料（rules/wut）必须能切出条款，否则引用定位与校验都失效。"""
+        documents = load_documents(BACKEND_DIR.parent / "rules" / "wut")
+        self.assertGreaterEqual(len(documents), 20, "真实语料篇数不足")
+        total = sum(len(document.chunks) for document in documents)
+        self.assertGreater(total, 400, f"真实语料切分过少：{total}")
+        for document in documents:
+            longest = max((len(chunk.content) for chunk in document.chunks), default=0)
+            self.assertLess(longest, 2000, f"{document.file_name} 存在超长 chunk，切分失效")
 
 
 if __name__ == "__main__":

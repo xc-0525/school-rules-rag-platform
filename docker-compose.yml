@@ -126,7 +126,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment: *backend-env
-    command: ["python", "scripts/ingest_rules.py", "--dir", "../rules", "--reset"]
+    command: ["python", "scripts/ingest_rules.py", "--dir", "../rules/wut", "--reset"]
     volumes:
       - ./models/bge-small-zh-v1.5:/models/bge-small-zh-v1.5:ro
     depends_on:

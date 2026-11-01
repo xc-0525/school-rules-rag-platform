@@ -29,10 +29,11 @@
 | Tool Calling + 多轮记忆 | ✅ 3 个真实工具 + LLM 自主选工具 + 追问改写 | [`backend/app/agents/tools.py`](backend/app/agents/tools.py) |
 | v2 真实向量检索（Qdrant 本地嵌入式 + BGE-small-zh） | ✅ 已实测（512 维，检索约 0.05s/次） | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
 | v2 MySQL 落库 / 会话历史 / 点赞点踩 | ✅ 11 张表 + 真实 DeepSeek 全链路通过 | [`backend/app/services/persistence.py`](backend/app/services/persistence.py) |
-| v2 真实 Neo4j 图谱 | ✅ 已灌入样例手册（1 文档 / 8 章节 / 26 条款 / 7 主题），双路召回已验证 | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
+| v2 真实 Neo4j 图谱 | ✅ 已灌入真实语料（21 篇校规 / 498 条条款），双路召回已验证 | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
 | 校规文档入库流水线 | ✅ 解析 → MySQL → BGE → Qdrant → Neo4j（命令行 + 上传接口） | [`backend/scripts/ingest_rules.py`](backend/scripts/ingest_rules.py) |
 | 文档上传 / 列表 / 详情 / 删除 API | ✅ `.md/.txt` + 文字版 PDF（base64）；扫描件自动 OCR（已实测，单页约 8s） | [`backend/app/api/v1/documents.py`](backend/app/api/v1/documents.py) |
-| 校规样例文档 | ✅ 已提供（虚构样例，替换真实文档后重跑入库即可） | [`rules/学生手册节选.md`](rules/学生手册节选.md) |
+| 校规真实语料 | ✅ 21 篇（武昌理工学院官网公开制度，含违纪处分/学籍/宿舍/奖助/图书馆/一卡通），由 `fetch_rules.py` 抓取清洗 | [`rules/wut/`](rules/README.md) |
+| 语料抓取清洗脚本 | ✅ 三种页面模板抽取 → 去页面元信息 → 章节/条款结构化 → 输出可入库 Markdown | [`backend/scripts/fetch_rules.py`](backend/scripts/fetch_rules.py) |
 | Vue3 前端（问答 / 轨迹 / 历史 / 文档） | ✅ 已完成：SSE 流式问答 + Agent 轨迹 + 来源引用 + 会话历史 + 文档管理 | [`frontend/`](frontend/) |
 | 登录鉴权（admin / student） | ✅ 登录页 + 学生自助注册 + Bearer token + 按用户隔离会话；管理员才能上传/删除文档 | [`backend/app/services/auth.py`](backend/app/services/auth.py) |
 | Docker 公网部署 | 🟡 Dockerfile ×2 + Compose + 部署文档已就绪；配置已通过 `docker compose config` 校验，待启动 Docker daemon 做镜像构建实测 | [`docker-compose.yml`](docker-compose.yml) · [`docs/deploy-public.md`](docs/deploy-public.md) |
@@ -46,7 +47,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_neo4j.ps1
 
 # 2) 首次/更新校规文档时入库（BGE 首次加载约 2~3 分钟）
 cd backend
-python scripts/ingest_rules.py --dir ../rules --reset
+python scripts/ingest_rules.py --reset          # 默认入库 rules/wut 真实语料
 
 # 3) 启动后端（start_backend.ps1 默认 SERVE_FRONTEND=1，直接访问 http://127.0.0.1:8000 即可）
 cd ..
@@ -65,14 +66,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
 > 实际演示用 `start_backend.ps1` 时会自动设置 `AUTH_REQUIRED=1`（所有业务接口需带 Bearer token）。
-> 当前测试：**85 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆 + 审查整改/融合闸门/工单确认回归）；
+> 当前测试：**86 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆 + 审查整改/融合闸门/工单确认回归）；
 > 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
 > 本轮已修复：降级答案不再进缓存、文档上传/删除后清空缓存、上传前预检 Neo4j 并在失败时回滚半成品、
 > 图谱标题引用校验误判、启动脚本固定全局 Python。
 
 ### ⚠️ 已知限制与待补事项
 
-1. **校规内容为虚构样例**：`rules/学生手册节选.md` 只用于跑通链路，拿到学校真实文件后替换并重新入库即可；
+1. **语料来源为官网公开页面**：`rules/wut/` 的 21 篇由 `scripts/fetch_rules.py` 抓取清洗，来源 URL 与抓取时间见 `rules/wut/_sources.json`；
+   官网未公开整本《学生手册》，故为分项制度汇编；《学生管理规定》缺第十八至二十四条，同制度多版本并存（助学金金额口径不一致），
+   详见 [`rules/README.md`](rules/README.md) 的"已知语料缺口"；
 2. **扫描件 OCR 已可用但建议人工抽查**：`rapidocr_onnxruntime` + Pillow 已安装，实测单页约 8 秒；
    OCR 可能把「第1条」识别成「第1 条」（已做文本归一化修正），但真实扫描件的错字/页眉页脚仍需入库前抽查；
 3. **未配置大模型 Key 时的行为**：问答不会整段失败——检索照常执行，生成节点降级为
@@ -528,13 +531,13 @@ Swagger <http://127.0.0.1:8000/docs> 里也能直接测。
 
 ```bash
 cd backend
-python scripts/ingest_rules.py --dir ../rules --reset
+python scripts/ingest_rules.py --reset          # 默认 rules/wut
 ```
 
 > ⚠️ Qdrant 本地嵌入式模式同一目录只能被一个进程打开：**跑命令行入库前先停掉后端**；
 > 后端运行时请用上传接口。命令行目前只处理 `.md` / `.txt`，PDF 请走上上传接口。
-> 仓库内 `rules/学生手册节选.md`（26 条）和 `rules/校园服务指南节选.md`（16 条）都是虚构样例；
-> 当前库内为 2 份文档 / 42 个条款（Qdrant 42 个向量、Neo4j 42 个条款节点）。
+> 语料构成：`rules/wut/` 21 篇真实制度（498 个条款级 chunk）；`rules/_sample/` 是虚构样例，仅用于链路自测
+> （`--dir ../rules/_sample`），不要用于生产。
 
 ### 6.7 前端启动（Vue3 + Vite）
 
@@ -573,12 +576,15 @@ school-rules-rag-platform/
 │   │   ├── services/        #   LLM / Qdrant+BGE / Neo4j / MySQL / 语义缓存适配器
 │   │   ├── db/              #   SQLAlchemy 模型与引擎
 │   │   └── schemas/         #   Pydantic 模型
-│   ├── tests/               # ✅ 46 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 鉴权/注册 + Tool/Memory + 缓存/引用/OCR 回归）
+│   ├── tests/               # ✅ 86 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 鉴权/注册 + Tool/Memory + 缓存/引用/OCR 回归）
 │   ├── scripts/
-│   │   └── ingest_rules.py  # ✅ 校规文档入库（MySQL + Qdrant + Neo4j）
+│   │   ├── ingest_rules.py  # ✅ 校规文档入库（MySQL + Qdrant + Neo4j）
+│   │   ├── fetch_rules.py   # ✅ 抓取官网校规并清洗成可入库 Markdown
+│   │   └── evaluate.py      # ✅ 离线评测（recall@3 / MRR / 拒答 / 引用通过率 / 时延）
 │   └── data/                #   本地 Qdrant 数据（已 gitignore）
-├── rules/                   # ✅ 校规文档目录（当前为虚构样例，替换为真实文件）
-│   ├── 学生手册节选.md
+├── rules/                   # ✅ 校规语料
+│   ├── wut/                 #   真实语料：21 篇官网制度 + _sources.json
+│   ├── _sample/             #   虚构样例：仅链路自测，勿用于生产
 │   └── README.md
 ├── frontend/                # ✅ Vue3 + Vite 前端
 │   ├── src/

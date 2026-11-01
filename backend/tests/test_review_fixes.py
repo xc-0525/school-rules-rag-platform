@@ -434,7 +434,8 @@ class UploadRawTests(unittest.TestCase):
     def test_requires_login(self) -> None:
         client = self._client()
         response = client.post(
-            "/api/v1/documents/upload-raw?filename=a.md", content=b"# t\n\u7b2c1\u6761 x"
+            "/api/v1/documents/upload-raw?filename=a.md",
+            content="# t\n第1条 x".encode("utf-8"),
         )
         self.assertEqual(response.status_code, 401)
 

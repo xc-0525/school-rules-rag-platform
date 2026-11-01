@@ -1,0 +1,236 @@
+{
+  "generated_at": "2026-11-01 13:20:41",
+  "docs": [
+    {
+      "id": "01",
+      "file": "01-学生违纪违规处理规定.md",
+      "title": "武昌理工学院学生违纪违规处理规定",
+      "url": "https://xgc.wut.edu.cn/info/1831/35071.htm",
+      "category": "违纪处分",
+      "note": "",
+      "chapters": 4,
+      "articles": 32,
+      "chars": 10273
+    },
+    {
+      "id": "02",
+      "file": "02-普通高等学校学生管理规定.md",
+      "title": "普通高等学校学生管理规定（教育部令第41号）",
+      "url": "https://xgc.wut.edu.cn/info/1821/7711.htm",
+      "category": "上位法规",
+      "note": "",
+      "chapters": 14,
+      "articles": 68,
+      "chars": 9450
+    },
+    {
+      "id": "03",
+      "file": "03-学生学籍管理规定本科.md",
+      "title": "武昌理工学院学生学籍管理规定（本科）",
+      "url": "https://wbs.wut.edu.cn/info/3021/118881.htm",
+      "category": "学籍管理",
+      "note": "",
+      "chapters": 10,
+      "articles": 52,
+      "chars": 8851
+    },
+    {
+      "id": "04",
+      "file": "04-学生学籍管理规定专科.md",
+      "title": "武昌理工学院学生学籍管理规定（专科）",
+      "url": "https://music.wut.edu.cn/info/1291/2321.htm",
+      "category": "学籍管理",
+      "note": "",
+      "chapters": 13,
+      "articles": 42,
+      "chars": 4043
+    },
+    {
+      "id": "05",
+      "file": "05-学生管理规定总则部分.md",
+      "title": "武昌理工学院学生管理规定（总则部分）",
+      "url": "https://tw.wut.edu.cn/info/1251/1291.htm",
+      "category": "学生管理",
+      "note": "",
+      "chapters": 5,
+      "articles": 17,
+      "chars": 3028
+    },
+    {
+      "id": "06",
+      "file": "06-学生管理规定学籍与奖惩部分.md",
+      "title": "武昌理工学院学生管理规定（学籍异动与奖惩部分）",
+      "url": "https://tw.wut.edu.cn/info/1251/1281.htm",
+      "category": "学生管理",
+      "note": "官网该页从第二十五条起，前三章未公开，属节选",
+      "chapters": 7,
+      "articles": 42,
+      "chars": 4717
+    },
+    {
+      "id": "07",
+      "file": "07-学生守则.md",
+      "title": "武昌理工学院学生守则",
+      "url": "https://nurse.wut.edu.cn/info/1651/7611.htm",
+      "category": "行为规范",
+      "note": "",
+      "chapters": 0,
+      "articles": 12,
+      "chars": 876
+    },
+    {
+      "id": "08",
+      "file": "08-学生住宿管理规定.md",
+      "title": "武昌理工学院学生住宿管理规定",
+      "url": "https://xgc.wut.edu.cn/info/1771/6011.htm",
+      "category": "宿舍管理",
+      "note": "",
+      "chapters": 0,
+      "articles": 8,
+      "chars": 923
+    },
+    {
+      "id": "09",
+      "file": "09-学生请假暂行规定.md",
+      "title": "武昌理工学院学生请假暂行规定",
+      "url": "https://nurse.wut.edu.cn/info/1651/7831.htm",
+      "category": "考勤请假",
+      "note": "",
+      "chapters": 4,
+      "articles": 12,
+      "chars": 1215
+    },
+    {
+      "id": "10",
+      "file": "10-奖助学金评定办法.md",
+      "title": "武昌理工学院国家奖学金、国家励志奖学金、国家助学金评定办法",
+      "url": "https://nurse.wut.edu.cn/info/1651/7731.htm",
+      "category": "奖助学金",
+      "note": "",
+      "chapters": 0,
+      "articles": 7,
+      "chars": 646
+    },
+    {
+      "id": "11",
+      "file": "11-国家助学金实施办法.md",
+      "title": "武昌理工学院国家助学金实施办法",
+      "url": "https://art.wut.edu.cn/info/1761/47751.htm",
+      "category": "奖助学金",
+      "note": "与 10 号文件条款有重叠，金额标准以最新版为准",
+      "chapters": 2,
+      "articles": 14,
+      "chars": 983
+    },
+    {
+      "id": "12",
+      "file": "12-图书馆管理制度.md",
+      "title": "武昌理工学院图书馆管理制度",
+      "url": "https://tw.wut.edu.cn/info/1251/53541.htm",
+      "category": "图书馆",
+      "note": "",
+      "chapters": 2,
+      "articles": 25,
+      "chars": 2907
+    },
+    {
+      "id": "13",
+      "file": "13-图书馆入馆规定.md",
+      "title": "武昌理工学院图书馆入馆规定",
+      "url": "https://znlib.wut.edu.cn/bggk/rggd.htm",
+      "category": "图书馆",
+      "note": "",
+      "chapters": 0,
+      "articles": 10,
+      "chars": 641
+    },
+    {
+      "id": "14",
+      "file": "14-图书馆常见问题.md",
+      "title": "武昌理工学院图书馆常见问题",
+      "url": "https://znlib.wut.edu.cn/lxwm/FAQ.htm",
+      "category": "图书馆",
+      "note": "",
+      "chapters": 1,
+      "articles": 40,
+      "chars": 3999
+    },
+    {
+      "id": "15",
+      "file": "15-平时成绩管理办法.md",
+      "title": "武昌理工学院智能建造学院平时成绩管理办法",
+      "url": "https://city.wut.edu.cn/info/1361/35041.htm",
+      "category": "教学管理",
+      "note": "学院级文件，缺勤取消考试资格等规定对全校有参考价值",
+      "chapters": 3,
+      "articles": 26,
+      "chars": 1937
+    },
+    {
+      "id": "16",
+      "file": "16-招生章程.md",
+      "title": "武昌理工学院2024年招生章程",
+      "url": "https://xxgk.wut.edu.cn/info/1301/7984.htm",
+      "category": "招生",
+      "note": "",
+      "chapters": 10,
+      "articles": 22,
+      "chars": 1994
+    },
+    {
+      "id": "17",
+      "file": "17-学生重评缓评暂行规定.md",
+      "title": "武昌理工学院学生重评、缓评暂行规定",
+      "url": "https://cie.wut.edu.cn/info/1851/13551.htm",
+      "category": "考试管理",
+      "note": "",
+      "chapters": 2,
+      "articles": 11,
+      "chars": 951
+    },
+    {
+      "id": "18",
+      "file": "18-学生宿舍文明建设管理规定.md",
+      "title": "武昌理工学院学生宿舍文明建设管理规定",
+      "url": "https://xgc.wut.edu.cn/info/1771/34671.htm",
+      "category": "宿舍管理",
+      "note": "含熄灯 23:00、晚归认定与处分标准",
+      "chapters": 0,
+      "articles": 13,
+      "chars": 854
+    },
+    {
+      "id": "19",
+      "file": "19-学生公寓门禁管理暂行规定.md",
+      "title": "武昌理工学院学生公寓门禁管理暂行规定",
+      "url": "https://xgc.wut.edu.cn/info/1771/6031.htm",
+      "category": "宿舍管理",
+      "note": "校园卡门禁、遗失补办时限",
+      "chapters": 0,
+      "articles": 10,
+      "chars": 1306
+    },
+    {
+      "id": "20",
+      "file": "20-校园一卡通使用指南.md",
+      "title": "武昌理工学院校园一卡通使用指南",
+      "url": "https://ecard.wut.edu.cn/info/1221/3752.htm",
+      "category": "校园卡",
+      "note": "含挂失、补办、充值、宿舍购电流程",
+      "chapters": 0,
+      "articles": 7,
+      "chars": 581
+    },
+    {
+      "id": "21",
+      "file": "21-新生入学指南学校住宿.md",
+      "title": "武昌理工学院新生入学指南·学校住宿",
+      "url": "https://www.wut.edu.cn/info/2711/169021.htm",
+      "category": "宿舍管理",
+      "note": "含作息（6:00 开门、23:00 关门熄灯、周五周六不熄灯、五一至十一通宵供电）与住宿费标准；原始页面为 2020 年版，时效性需注意",
+      "chapters": 4,
+      "articles": 0,
+      "chars": 462
+    }
+  ]
+}
