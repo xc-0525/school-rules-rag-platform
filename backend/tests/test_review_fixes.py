@@ -352,6 +352,28 @@ class SufficiencyJudgeTests(unittest.TestCase):
         self.assertEqual(final, "reject_handoff", "扩展耗尽后应拒答")
         self.assertIn("校医院", reason)
 
+    def test_reject_keeps_nearest_evidence(self) -> None:
+        """拒答时也要带回检索到的条款。
+
+        否则用户只看到"未找到"，无法区分「知识库确实没有」和「检索跑偏/判定过严」。
+        """
+        settings = make_settings()
+        services = build_services(settings)
+        services.llm = FakeLLM()
+        evidence = [
+            self._evidence(f"第{i}条 助学金相关内容{i}")[0].model_copy(
+                update={"detail": f"第{i}条", "score": 0.9 - i * 0.05}
+            )
+            for i in range(1, 6)
+        ]
+        state = AgentState(query="助学金什么时候发放", evidence=evidence)
+        ctx = NodeContext(services=services, settings=settings, bus=NullBus())
+        result = asyncio.run(nodes.reject_handoff(state, ctx))
+        self.assertTrue(result["refused"])
+        self.assertEqual(len(result["sources"]), 3, "应带回相关度最高的 3 条")
+        self.assertEqual(result["sources"][0].detail, "第1条", "按相关度排序")
+        self.assertIn("未找到", result["answer"])
+
     def test_route_generates_when_sufficient(self) -> None:
         settings = make_settings()
         spec, _ = build_graph(settings)

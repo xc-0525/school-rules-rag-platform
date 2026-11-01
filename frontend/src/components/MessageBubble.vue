@@ -36,7 +36,15 @@
         :trace="message.trace"
         :runtime="message.runtime"
       />
-      <SourceList v-if="message.role === 'assistant'" :sources="message.sources" />
+      <div v-if="message.refused && message.sufficiencyReason" class="reject-reason">
+        判定原因：{{ message.sufficiencyReason }}
+      </div>
+
+      <SourceList
+        v-if="message.role === 'assistant'"
+        :sources="message.sources"
+        :refused="message.refused"
+      />
 
       <div
         v-if="message.role === 'assistant' && message.toolDrafts && message.toolDrafts.length"

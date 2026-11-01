@@ -23,10 +23,19 @@
       </div>
     </div>
 
+    <div class="doc-summary">
+      <el-tag effect="plain" round>共 {{ documents.length }} 篇</el-tag>
+      <el-tag effect="plain" round type="success">{{ totalChunks }} 条条款</el-tag>
+      <el-tag v-if="typeSummary" effect="plain" round type="info">{{ typeSummary }}</el-tag>
+      <span class="muted" style="font-size: 12px">
+        点任意一行右侧「详情」可查看切分后的条款原文——问答只会在这些条款里找答案
+      </span>
+    </div>
+
     <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
       <template #title>上传说明</template>
       <div class="upload-hint">
-        支持 <b>.md / .txt / 文字版 .pdf</b>；PDF 前端会读成 base64 上传，不依赖 multipart。<br />
+        支持 <b>.md / .txt / 文字版 .pdf</b>；上传走原始字节流（不做 base64），服务端边收边落盘。<br />
         后端需要以真实模式运行（<code>VECTOR_MODE=qdrant</code> + Neo4j 已启动），首次入库会预热 BGE，可能较慢。<br />
         扫描件 PDF 需要额外安装 OCR 引擎（<code>rapidocr_onnxruntime</code>），否则会返回"需要 OCR"的提示。
       </div>
@@ -65,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { deleteDocument, fetchDocuments, uploadDocumentRaw } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -73,6 +82,20 @@ import type { DocumentItem } from '../types'
 
 const auth = useAuthStore()
 const documents = ref<DocumentItem[]>([])
+
+const totalChunks = computed(() =>
+  documents.value.reduce((sum, item) => sum + (item.chunk_count || 0), 0),
+)
+const typeSummary = computed(() => {
+  const counter = new Map<string, number>()
+  documents.value.forEach((item) => {
+    const key = (item.file_type || 'md').toLowerCase()
+    counter.set(key, (counter.get(key) || 0) + 1)
+  })
+  return Array.from(counter.entries())
+    .map(([type, count]) => `${type} ${count}`)
+    .join(' · ')
+})
 const loading = ref(false)
 const uploading = ref(false)
 const deletingId = ref<number | null>(null)

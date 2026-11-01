@@ -42,6 +42,7 @@ from app.agents.prompts import (  # noqa: F401
     TOOL_SYSTEM_PROMPT,
 )
 from app.agents.runtime import NodeContext
+from app.schemas.chat import SourceItem
 from app.agents.state import AgentState
 from app.agents.tools_node import tool_agent  # noqa: F401
 from app.services import lexicon
@@ -244,9 +245,22 @@ async def generate_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]
     return {"answer": "".join(pieces)}
 
 async def reject_handoff(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
-    await ctx.emit("meta", {"sources": [], "cached": False, "refused": True})
+    """拒答，但保留检索到的相近条款。
+
+    以前这里返回空来源，用户只看到"未找到"，无法区分是
+    "知识库确实没有" 还是 "检索跑偏/判定过严"。现在把已召回的
+    前 3 条一并带回，前端标注为"未采用"，用户能直接看出检索到了什么。
+    """
+    fallback = [
+        SourceItem(type=item.type, title=item.title, detail=item.detail, snippet=item.snippet)
+        for item in sorted(state.evidence, key=lambda entry: entry.score, reverse=True)[:3]
+    ]
+    await ctx.emit(
+        "meta",
+        {"sources": [item.model_dump() for item in fallback], "cached": False, "refused": True},
+    )
     await ctx.delta(NO_EVIDENCE_ANSWER)
-    return {"answer": NO_EVIDENCE_ANSWER, "refused": True, "sources": []}
+    return {"answer": NO_EVIDENCE_ANSWER, "refused": True, "sources": fallback}
 
 async def degrade_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     await ctx.delta(DEGRADE_NOTE)

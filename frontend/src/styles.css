@@ -542,6 +542,25 @@ body {
 }
 
 /* ---------------- 来源引用 ---------------- */
+.doc-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.reject-reason {
+  margin-top: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: #8a5a12;
+  background: #fff8e8;
+  border-left: 3px solid #e6a23c;
+  border-radius: 6px;
+}
+
 .source-list {
   margin-top: 12px;
 }

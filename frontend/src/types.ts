@@ -83,6 +83,8 @@ export interface Message {
   degraded?: boolean
   cached?: boolean
   llmFailed?: boolean
+  /** 拒答时的判定依据（"条款未提及…"），用于向用户解释为什么答不了 */
+  sufficiencyReason?: string
   latency_ms?: number
   trace?: TraceEvent[]
   runtime?: RuntimeInfo

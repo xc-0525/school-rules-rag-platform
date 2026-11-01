@@ -1,6 +1,12 @@
 <template>
   <div v-if="sources && sources.length" class="source-list">
-    <div class="source-title">依据来源（{{ sources.length }} 条）</div>
+    <div class="source-title">
+      {{
+        refused
+          ? `已检索到的相近条款（${sources.length} 条，未采用）`
+          : `依据来源（${sources.length} 条）`
+      }}
+    </div>
     <div v-for="(source, index) in sources" :key="index" class="source-card">
       <div class="source-head">
         <el-tag
@@ -21,5 +27,5 @@
 <script setup lang="ts">
 import type { SourceItem } from '../types'
 
-defineProps<{ sources?: SourceItem[] | null }>()
+defineProps<{ sources?: SourceItem[] | null; refused?: boolean }>()
 </script>
