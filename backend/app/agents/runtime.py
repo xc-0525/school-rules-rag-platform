@@ -93,6 +93,8 @@ class WorkflowEngine:
         self.events: list[dict[str, Any]] = []
         self.visited: list[str] = []
         self.started_at = 0.0
+        # 最近一次合并后的状态：图抛异常时，接口层据此判断是否已经落过库
+        self.state: AgentState | None = None
 
     # ------------------------------------------------------------------ 工具
     def _ms(self) -> int:
@@ -118,6 +120,7 @@ class WorkflowEngine:
     async def run(self, state: AgentState) -> AgentState:
         """从 entry 节点开始跑图，直到走到没有下一节点为止。"""
         self.started_at = time.perf_counter()
+        self.state = state
         current: str | None = self.entry
 
         while current is not None:
@@ -135,6 +138,7 @@ class WorkflowEngine:
             update = await self._execute(spec, state)
             if update:
                 state = state.model_copy(update=update)
+            self.state = state
 
             if spec.route is not None:
                 nxt, reason = spec.route(state)

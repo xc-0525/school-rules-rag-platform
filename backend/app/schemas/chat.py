@@ -50,6 +50,9 @@ class ChatResponse(BaseModel):
         description="引用校验状态：verified=通过；unverified=未通过；skipped=工具直答未参与校验",
     )
     grounding_reason: str = ""
+    llm_failed: bool = Field(
+        default=False, description="true=大模型不可用（未配置 key 或调用失败），答案已降级"
+    )
     conversation_id: int | None = None
     message_id: int | None = Field(default=None, description="助手消息 id，前端点赞点踩可直接用")
     tool_drafts: list[dict[str, Any]] = Field(

@@ -61,6 +61,7 @@ export interface ChatDonePayload {
   cached: boolean
   grounding_status?: 'verified' | 'unverified' | 'skipped'
   grounding_reason?: string
+  llm_failed?: boolean
   conversation_id: number | null
   message_id?: number | null
   tool_drafts?: TicketDraft[]
@@ -79,6 +80,7 @@ export interface Message {
   refused?: boolean
   degraded?: boolean
   cached?: boolean
+  llmFailed?: boolean
   latency_ms?: number
   trace?: TraceEvent[]
   runtime?: RuntimeInfo

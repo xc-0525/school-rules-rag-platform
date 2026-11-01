@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 from typing import Any
@@ -26,6 +27,13 @@ from app.core.config import Settings
 from app.schemas.chat import ChatRequest, ChatResponse, SourceItem
 from app.services.auth import AuthUser, build_current_user_dependency
 from app.services.llm import LLMError
+
+
+logger = logging.getLogger("app.chat")
+
+FALLBACK_ERROR_ANSWER = (
+    "抱歉，本次问答在处理过程中出现异常，未能生成答案。提问记录已保存，可稍后重试。"
+)
 
 
 def sse_event(event: str, payload: dict[str, Any]) -> str:
@@ -52,6 +60,7 @@ def _done_payload(state: AgentState, engine: WorkflowEngine, started: float) -> 
         "cached": state.cached,
         "grounding_status": state.grounding_status,
         "grounding_reason": state.grounding_reason,
+        "llm_failed": state.llm_failed,
         "conversation_id": state.conversation_id,
         "message_id": state.message_id,
         "tool_drafts": state.tool_drafts,
@@ -105,6 +114,27 @@ def build_router(
     def make_engine(bus: Any = None) -> WorkflowEngine:
         return WorkflowEngine(nodes, entry, services, settings, bus)
 
+    async def persist_failure(state: AgentState) -> None:
+        """兜底：图执行抛异常时也要留下一条记录。
+
+        否则用户只看到 502/报错，会话历史里什么都没有——这正是"未配置 API Key
+        时记录全部丢失"的原因。已经落过库（conversation_id 已回填）则跳过。
+        """
+        if state.conversation_id:
+            return
+        snapshot = state.model_copy(
+            update={
+                "answer": FALLBACK_ERROR_ANSWER,
+                "degraded": True,
+                "grounding_status": "skipped",
+                "sources": [],
+            }
+        )
+        try:
+            await services.persistence.save_qa(snapshot)
+        except Exception:  # noqa: BLE001 —— 兜底失败不能再抛，否则连报错都返回不去
+            logger.exception("兜底落库失败 user_id=%s", state.user_id)
+
     @router.post(
         "/chat",
         response_model=ChatResponse,
@@ -144,6 +174,7 @@ def build_router(
             try:
                 final = await engine.run(state)
             except Exception as exc:  # noqa: BLE001
+                await persist_failure(engine.state or state)
                 raise HTTPException(status_code=502, detail=_friendly_error(exc)) from exc
             finally:
                 _release(rate_key)
@@ -156,6 +187,7 @@ def build_router(
                 cached=final.cached,
                 grounding_status=final.grounding_status,
                 grounding_reason=final.grounding_reason,
+                llm_failed=final.llm_failed,
                 conversation_id=final.conversation_id,
                 message_id=final.message_id,
                 tool_drafts=final.tool_drafts,
@@ -172,6 +204,7 @@ def build_router(
                 final = await engine.run(state)
                 await bus.emit("done", _done_payload(final, engine, started))
             except Exception as exc:  # noqa: BLE001
+                await persist_failure(engine.state or state)
                 await bus.emit("error", {"message": _friendly_error(exc)})
             finally:
                 await bus.close()

@@ -64,6 +64,15 @@ def build_graph(settings: Settings) -> tuple[dict[str, NodeSpec], str]:
             f"已扩展检索词（第 {state.retrieval_round} 轮）：{'、'.join(state.expansion_terms)}",
         )
 
+    def route_generate(state) -> tuple[str | None, str]:
+        """生成后的分支：大模型不可用时直接落库，不再进引用校验/重试。"""
+        if state.llm_failed:
+            return (
+                "persist_answer",
+                "大模型不可用，已用降级文案落库（保证提问记录不丢）",
+            )
+        return "verify_grounding", "生成完成，进入引用校验"
+
     def route_grounding(state) -> tuple[str | None, str]:
         # 三态：skipped 表示工具直答未参与校验，直接落库；只有 unverified 才重生成
         if state.grounding_status == "verified":
@@ -157,9 +166,9 @@ def build_graph(settings: Settings) -> tuple[dict[str, NodeSpec], str]:
         "generate_answer": NodeSpec(
             name="generate_answer",
             label="生成 Agent",
-            description="DeepSeek 证据约束生成，SSE 流式输出",
+            description="DeepSeek 证据约束生成，SSE 流式输出；模型不可用时降级落库",
             run=nodes.generate_answer,
-            next="verify_grounding",
+            route=route_generate,
         ),
         "verify_grounding": NodeSpec(
             name="verify_grounding",

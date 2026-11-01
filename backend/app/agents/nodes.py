@@ -32,6 +32,10 @@ NO_EVIDENCE_ANSWER = (
     "抱歉，未找到相关校规或校园服务信息。建议换一种说法重新提问，或联系辅导员 / 学生工作处进行人工确认。"
 )
 DEGRADE_NOTE = "\n\n（说明：本答案未通过引用校验，仅供参考，请以《学生手册》原文为准。）"
+LLM_UNAVAILABLE_ANSWER = (
+    "抱歉，大模型服务当前不可用（未配置 DEEPSEEK_API_KEY，或调用失败），"
+    "本次只完成了知识库检索、未能生成答案。你的提问记录已保存，可稍后重试。"
+)
 
 SYSTEM_PROMPT = (
     "你是高校『校园服务与校纪校规』智能问答助手。必须严格遵守：\n"
@@ -536,9 +540,25 @@ async def generate_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]
         )
     messages = build_messages(state, strict=state.regen_count > 0)
     pieces: list[str] = []
-    async for piece in ctx.services.llm.stream(messages):
-        pieces.append(piece)
-        await ctx.delta(piece)
+    try:
+        async for piece in ctx.services.llm.stream(messages):
+            pieces.append(piece)
+            await ctx.delta(piece)
+    except Exception as exc:  # noqa: BLE001 —— 大模型不可用不能吞掉整次问答
+        logger.exception("大模型生成失败，降级为提示文案并继续落库")
+        note = LLM_UNAVAILABLE_ANSWER
+        if state.evidence:
+            note = (
+                f"{note}\n\n（本次已检索到 {len(state.evidence)} 条相关条款，可在下方来源中查看。）"
+            )
+        await ctx.delta(note)
+        return {
+            "answer": note,
+            "llm_failed": True,
+            "llm_error": f"{type(exc).__name__}: {exc}"[:200],
+            # 标记降级：前端会显示"降级回答"，同时这条答案不会被写入缓存
+            "degraded": True,
+        }
     return {"answer": "".join(pieces)}
 
 

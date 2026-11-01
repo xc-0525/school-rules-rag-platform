@@ -70,6 +70,7 @@ export const useChatStore = defineStore('chat', {
       message.refused = !!payload.refused
       message.degraded = !!payload.degraded
       message.cached = !!payload.cached
+      message.llmFailed = !!payload.llm_failed
       message.latency_ms = payload.latency_ms
       message.runtime = payload.runtime
       // 落库回执直接带 message_id，省掉"再查一次会话详情"的额外请求

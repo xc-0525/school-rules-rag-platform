@@ -8,7 +8,8 @@
       <div v-if="message.role === 'assistant'" class="message-meta">
         <el-tag v-if="message.cached" size="small" type="info" effect="plain">缓存命中</el-tag>
         <el-tag v-if="message.refused" size="small" type="warning" effect="plain">防幻觉拒答</el-tag>
-        <el-tag v-if="message.degraded" size="small" type="danger" effect="plain">降级回答</el-tag>
+        <el-tag v-if="message.llmFailed" size="small" type="danger" effect="plain">模型不可用</el-tag>
+        <el-tag v-else-if="message.degraded" size="small" type="danger" effect="plain">降级回答</el-tag>
         <span v-if="message.latency_ms" class="meta-text">耗时 {{ message.latency_ms }}ms</span>
       </div>
 

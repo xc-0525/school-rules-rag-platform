@@ -70,6 +70,9 @@ class AgentState(BaseModel):
     refused: bool = False
     degraded: bool = False
     cached: bool = False
+    # 大模型不可用（未配置 key / 调用失败）：答案走降级文案，但记录必须照常落库
+    llm_failed: bool = False
+    llm_error: str = ""
 
     # ---- 落库回执（前端点赞点踩直接用，省掉一次会话详情请求）----
     message_id: int | None = None

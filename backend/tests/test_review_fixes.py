@@ -480,6 +480,100 @@ class UploadRawTests(unittest.TestCase):
         self.assertIn("mock 向量模式", response.json()["detail"])
 
 
+class LLMFailurePersistenceTests(unittest.TestCase):
+    """未配置 API Key 时，提问记录仍必须按用户落库（回归：报错导致整段记录丢失）。"""
+
+    @staticmethod
+    def _no_key_settings(**overrides) -> Settings:
+        base = dict(
+            vector_mode="mock",
+            graph_mode="mock",
+            llm_mode="deepseek",
+            deepseek_api_key="",
+            auth_required=False,
+            dev_mode=True,
+        )
+        base.update(overrides)
+        return Settings(**base)
+
+    def test_engine_falls_back_and_persists(self) -> None:
+        settings = self._no_key_settings()
+        services = build_services(settings)
+        spec, entry = build_graph(settings)
+        state = asyncio.run(
+            WorkflowEngine(spec, entry, services, settings).run(
+                AgentState(query="宿舍晚上几点熄灯？", user_id=901)
+            )
+        )
+        self.assertTrue(state.llm_failed, "未配置 Key 时应标记 llm_failed")
+        self.assertTrue(state.degraded)
+        self.assertIn("不可用", state.answer)
+        self.assertIsNotNone(state.conversation_id, "必须落库")
+        self.assertGreater(len(state.sources), 0, "检索到的来源应保留")
+
+        conversations = services.persistence._conversations
+        self.assertEqual(len(conversations), 1)
+        self.assertEqual(next(iter(conversations.values()))["user_id"], 901)
+
+    def test_api_returns_degraded_instead_of_losing_record(self) -> None:
+        settings = self._no_key_settings()
+        services = build_services(settings)
+        client = TestClient(create_app(settings, services=services))
+
+        response = client.post(
+            "/api/v1/chat", json={"query": "宿舍晚上几点熄灯？", "stream": False}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["llm_failed"])
+        self.assertTrue(body["degraded"])
+        self.assertIsNotNone(body["conversation_id"])
+
+        history = client.get("/api/v1/conversations").json()
+        self.assertEqual(len(history), 1, "会话历史里应能看到这条记录")
+
+    def test_two_users_keep_their_own_records(self) -> None:
+        settings = self._no_key_settings(auth_required=True, dev_mode=False)
+        services = build_services(settings)
+        client = TestClient(create_app(settings, services=services))
+        headers_a = {"Authorization": f"Bearer {token_for(11, 'alice', 'student')}"}
+        headers_b = {"Authorization": f"Bearer {token_for(12, 'bob', 'student')}"}
+
+        client.post("/api/v1/chat", json={"query": "宿舍晚上几点熄灯？"}, headers=headers_a)
+        client.post("/api/v1/chat", json={"query": "图书馆几点开门？"}, headers=headers_b)
+
+        list_a = client.get("/api/v1/conversations", headers=headers_a).json()
+        list_b = client.get("/api/v1/conversations", headers=headers_b).json()
+        self.assertEqual(len(list_a), 1)
+        self.assertEqual(len(list_b), 1)
+        self.assertNotEqual(list_a[0]["id"], list_b[0]["id"])
+        # 列表接口按当前用户过滤，返回体不含 user_id，这里直接核对落库归属
+        owners = {row["user_id"] for row in services.persistence._conversations.values()}
+        self.assertEqual(owners, {11, 12})
+        self.assertIn("熄灯", list_a[0]["title"])
+        self.assertIn("图书馆", list_b[0]["title"])
+
+    def test_unexpected_error_still_persists(self) -> None:
+        """检索层抛异常时，兜底逻辑也要留下一条记录。"""
+        settings = self._no_key_settings()
+
+        class BrokenVector:
+            async def search(self, query: str, top_k: int = 3):
+                raise RuntimeError("qdrant down")
+
+        services = build_services(settings)
+        services.vector = BrokenVector()
+        client = TestClient(create_app(settings, services=services))
+
+        response = client.post(
+            "/api/v1/chat", json={"query": "宿舍晚上几点熄灯？", "stream": False}
+        )
+        self.assertEqual(response.status_code, 502, response.text)
+        conversations = services.persistence._conversations
+        self.assertEqual(len(conversations), 1, "异常也应留下记录")
+        self.assertEqual(next(iter(conversations.values()))["user_id"], 9001)
+
+
 class CacheAndFeedbackTests(unittest.TestCase):
     def test_cache_ttl_expiry(self) -> None:
         cache = MockSemanticCache(ttl_seconds=60, max_entries=10)
