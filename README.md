@@ -65,7 +65,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
 > 实际演示用 `start_backend.ps1` 时会自动设置 `AUTH_REQUIRED=1`（所有业务接口需带 Bearer token）。
-> 当前测试：**65 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆 + 审查整改回归）；
+> 当前测试：**73 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆 + 审查整改/融合闸门/工单确认回归）；
 > 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
 > 本轮已修复：降级答案不再进缓存、文档上传/删除后清空缓存、上传前预检 Neo4j 并在失败时回滚半成品、
 > 图谱标题引用校验误判、启动脚本固定全局 Python。
@@ -440,6 +440,15 @@ ALLOW_REGISTRATION=1
 # Agent 的 Tool Calling / 多轮记忆参数
 MAX_TOOL_ROUNDS=2
 MEMORY_WINDOW=6
+
+# 检索融合：gated=图谱质量不达标时整路不参与（默认）；rrf=两路始终参与（消融对照）
+FUSION_MODE=gated
+GRAPH_QUALITY_MIN_SCORE=0.55
+GRAPH_MAX_SHARE=0.5
+
+# 工单副作用控制：窗口内同标题同描述复用同一工单；无明确意图只出草稿
+TICKET_IDEMPOTENCY_SECONDS=600
+TICKET_REQUIRE_INTENT=1
 ```
 
 ```bash
@@ -473,6 +482,8 @@ curl -X POST http://127.0.0.1:8000/api/v1/documents/upload \
 ```
 
 响应示例：`{"document_id":2,"chunk_count":16,"chapters":6,"status":"done","message":"入库成功"}`。
+工单接口：`POST /api/v1/tickets`（用户在前端确认草稿后正式建单，同参数在幂等窗口内复用同一工单）。
+
 配套接口：`GET /api/v1/documents`（列表）、`GET /api/v1/documents/{id}`（详情+分块）、
 `DELETE /api/v1/documents/{id}`（同时清理 Qdrant 向量与 Neo4j 图谱）。
 Swagger <http://127.0.0.1:8000/docs> 里也能直接测。
@@ -593,7 +604,10 @@ school-rules-rag-platform/
 - **代码审查整改（P0/P1）**：鉴权默认安全 + 匿名独立身份、token 无状态签名、限流/日配额/并发闸门、
   引用校验三态 + 条款号核对、查询拆分为 generation/retrieval、查询扩展不再空转、图谱分按覆盖率标定 + RRF 融合、
   工单意图门禁与幂等、缓存 TTL、SSE reset 事件与断开取消、审计日志转线程池、上传者身份贯通
-- **离线评测脚本**：`backend/scripts/evaluate.py` + `tests/golden/qa_set.json`（recall@3 / MRR / 拒答准确率 / 引用通过率 / p50·p95）
+- **离线评测脚本**：`backend/scripts/evaluate.py` + `tests/golden/qa_set.json`（recall@3 / MRR / 拒答准确率 / 引用通过率 / p50·p95），支持 `--fusion gated|rrf` 做融合消融
+- **融合质量闸门**：图谱最高分不达准入线时整路剔除（`FUSION_MODE=gated`），并按 `GRAPH_MAX_SHARE` 限制图谱条目占比，避免弱图谱稀释向量召回
+- **工单二次确认**：Agent 只生成草稿，用户在前端点"确认提交"后才通过 `POST /api/v1/tickets` 落库，同参数幂等
+- **极简版 `backend/main.py` 已冻结**：仅作现场兜底，不再与 v2 同步；答辩口径以 v2 为准
 - Neo4j 图谱本体（Ontology）设计
 - **极简版多智能体闭环**：检索 / 图谱 Agent 并行召回（Mock）+ 证据融合 + 防幻觉拒答 + DeepSeek 流式生成 + MySQL Mock 落库
 - **v2 正式工程（课程答辩版）**：
