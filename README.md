@@ -65,7 +65,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
 > 实际演示用 `start_backend.ps1` 时会自动设置 `AUTH_REQUIRED=1`（所有业务接口需带 Bearer token）。
-> 当前测试：**78 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆 + 审查整改/融合闸门/工单确认回归）；
+> 当前测试：**85 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆 + 审查整改/融合闸门/工单确认回归）；
 > 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
 > 本轮已修复：降级答案不再进缓存、文档上传/删除后清空缓存、上传前预检 Neo4j 并在失败时回滚半成品、
 > 图谱标题引用校验误判、启动脚本固定全局 Python。
@@ -614,6 +614,8 @@ school-rules-rag-platform/
 - **融合质量闸门**：图谱最高分不达准入线时整路剔除（`FUSION_MODE=gated`），并按 `GRAPH_MAX_SHARE` 限制图谱条目占比，避免弱图谱稀释向量召回
 - **工单二次确认**：Agent 只生成草稿，用户在前端点"确认提交"后才通过 `POST /api/v1/tickets` 落库，同参数幂等
 - **上传链路去 base64（P2-11）**：新增 `upload-raw` 原始字节流通道，边收边落盘、累计超限即时 413 并清理半成品；前端不再 `FileReader → base64`（20MB PDF 峰值内存从约 100MB 降到约 1 倍文件大小）
+- **请求级 trace_id**：响应头回显 `X-Request-ID`，并写入每条应用日志与 `done` 事件，排查一次问答只需一个 id
+- **前端可取消**：切页/开新对话时中止 SSE 请求（`AbortController`），后端同时取消在途图执行，不白烧 token
 - **模型不可用时记录不丢**：生成节点捕获 LLM 异常并降级落库，接口层再加一层兜底落库；会话按 token 用户隔离，多用户各自独立
 - **极简版 `backend/main.py` 已冻结**：仅作现场兜底，不再与 v2 同步；答辩口径以 v2 为准
 - Neo4j 图谱本体（Ontology）设计

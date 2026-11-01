@@ -25,6 +25,7 @@ from app.api.v1.tickets import build_router as build_tickets_router
 from app.core.config import BASE_DIR, Settings
 from app.core.executors import shutdown_ingest_pool
 from app.core.ratelimit import RateLimiter
+from app.core.request_context import RequestIdFilter, install_request_id
 from app.services.auth import resolve_token
 from app.services.container import Services, build_services
 
@@ -34,8 +35,12 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     if not logging.getLogger().handlers:
         logging.basicConfig(
             level=logging.INFO,
-            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            format="%(asctime)s %(levelname)s [%(request_id)s] %(name)s: %(message)s",
         )
+    # 已有 handler（uvicorn / 测试框架）也要能渲染 request_id 字段
+    for handler in logging.getLogger().handlers:
+        if not any(isinstance(item, RequestIdFilter) for item in handler.filters):
+            handler.addFilter(RequestIdFilter())
     logger = logging.getLogger("app.main")
     settings = settings or Settings.from_env()
     services = services or build_services(settings)
@@ -98,6 +103,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             "接口：`POST /api/v1/chat`（流式问答）、`GET /api/v1/graph`（图定义）、`GET /health`。"
         ),
     )
+    install_request_id(app)
     app.state.settings = settings
     app.state.services = services
     app.state.nodes = nodes

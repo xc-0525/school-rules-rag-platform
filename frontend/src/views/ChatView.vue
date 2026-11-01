@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import MessageBubble from '../components/MessageBubble.vue'
 import { useChatStore } from '../stores/chat'
@@ -64,6 +64,8 @@ import type { Message, TicketDraft } from '../types'
 const store = useChatStore()
 const input = ref('')
 const scrollRef = ref<HTMLElement | null>(null)
+// 当前在途问答的取消句柄：切页或开新对话时中止，避免前端白等、后端白算
+let controller: AbortController | null = null
 
 const examples = [
   '宿舍晚上几点熄灯？',
@@ -95,6 +97,7 @@ async function send() {
   store.busy = true
   scrollToBottom()
 
+  controller = new AbortController()
   try {
     await streamChat(query, store.conversationId, {
       onTrace: (event) => store.addTrace(assistantIndex, event),
@@ -116,10 +119,15 @@ async function send() {
         scrollToBottom()
       },
       onError: (message) => store.failMessage(assistantIndex, message),
-    })
+    }, controller.signal)
   } catch (error: any) {
-    store.failMessage(assistantIndex, error?.message || String(error))
+    if (error?.name === 'AbortError') {
+      store.cancelMessage(assistantIndex)
+    } else {
+      store.failMessage(assistantIndex, error?.message || String(error))
+    }
   } finally {
+    controller = null
     store.busy = false
     scrollToBottom()
   }
@@ -131,9 +139,14 @@ function useExample(question: string) {
 }
 
 function newConversation() {
+  controller?.abort()
   store.resetConversation()
   input.value = ''
 }
+
+onBeforeUnmount(() => {
+  controller?.abort()
+})
 
 async function onConfirmTicket(index: number, draft: TicketDraft) {
   try {

@@ -24,6 +24,7 @@ from app.agents.events import EventBus
 from app.agents.runtime import WorkflowEngine, WorkflowError
 from app.agents.state import AgentState
 from app.core.config import Settings
+from app.core.request_context import current_request_id
 from app.schemas.chat import ChatRequest, ChatResponse, SourceItem
 from app.services.auth import AuthUser, build_current_user_dependency
 from app.services.llm import LLMError
@@ -61,6 +62,7 @@ def _done_payload(state: AgentState, engine: WorkflowEngine, started: float) -> 
         "grounding_status": state.grounding_status,
         "grounding_reason": state.grounding_reason,
         "llm_failed": state.llm_failed,
+        "request_id": current_request_id(),
         "conversation_id": state.conversation_id,
         "message_id": state.message_id,
         "tool_drafts": state.tool_drafts,
@@ -188,6 +190,7 @@ def build_router(
                 grounding_status=final.grounding_status,
                 grounding_reason=final.grounding_reason,
                 llm_failed=final.llm_failed,
+                request_id=current_request_id(),
                 conversation_id=final.conversation_id,
                 message_id=final.message_id,
                 tool_drafts=final.tool_drafts,

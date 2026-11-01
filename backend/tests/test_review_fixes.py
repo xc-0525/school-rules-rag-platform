@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 import time
 import unittest
@@ -572,6 +573,54 @@ class LLMFailurePersistenceTests(unittest.TestCase):
         conversations = services.persistence._conversations
         self.assertEqual(len(conversations), 1, "异常也应留下记录")
         self.assertEqual(next(iter(conversations.values()))["user_id"], 9001)
+
+
+class RequestIdTests(unittest.TestCase):
+    """请求级 trace_id：响应头回显、写进日志、随 done 下发。"""
+
+    def _client(self):
+        settings = make_settings()
+        services = build_services(settings)
+        services.llm = FakeLLM()
+        return TestClient(create_app(settings, services=services))
+
+    def test_header_is_generated_and_echoed(self) -> None:
+        client = self._client()
+        generated = client.get("/health").headers.get("X-Request-ID")
+        self.assertTrue(generated, "未带请求头时应自动生成")
+        echoed = client.get("/health", headers={"X-Request-ID": "trace-abc"}).headers.get(
+            "X-Request-ID"
+        )
+        self.assertEqual(echoed, "trace-abc")
+
+    def test_chat_response_and_done_carry_request_id(self) -> None:
+        client = self._client()
+        headers = {"X-Request-ID": "trace-xyz"}
+        body = client.post(
+            "/api/v1/chat",
+            json={"query": "宿舍晚上几点熄灯？", "stream": False},
+            headers=headers,
+        ).json()
+        self.assertEqual(body["request_id"], "trace-xyz")
+
+        stream = client.post(
+            "/api/v1/chat",
+            json={"query": "宿舍晚上几点熄灯？", "stream": True},
+            headers=headers,
+        )
+        done = ""
+        for block in stream.text.split("\n\n"):
+            if block.startswith("event: done"):
+                done = block
+        self.assertIn("trace-xyz", done)
+
+    def test_log_filter_injects_request_id(self) -> None:
+        from app.core.request_context import RequestIdFilter, set_request_id
+
+        set_request_id("trace-log")
+        record = logging.LogRecord("test", logging.INFO, __file__, 1, "msg", None, None)
+        RequestIdFilter().filter(record)
+        self.assertEqual(record.request_id, "trace-log")
 
 
 class CacheAndFeedbackTests(unittest.TestCase):

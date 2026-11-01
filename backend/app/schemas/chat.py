@@ -53,6 +53,7 @@ class ChatResponse(BaseModel):
     llm_failed: bool = Field(
         default=False, description="true=大模型不可用（未配置 key 或调用失败），答案已降级"
     )
+    request_id: str = Field(default="", description="本次请求的追踪 id（同时出现在响应头 X-Request-ID）")
     conversation_id: int | None = None
     message_id: int | None = Field(default=None, description="助手消息 id，前端点赞点踩可直接用")
     tool_drafts: list[dict[str, Any]] = Field(

@@ -86,6 +86,16 @@ export const useChatStore = defineStore('chat', {
       if (message) message.ticketNo = ticketNo
     },
 
+    /** 用户主动取消（切页/新对话）时收尾，不当作错误 */
+    cancelMessage(index: number) {
+      const message = this.messages[index]
+      if (!message) return
+      message.pending = false
+      message.content = message.content
+        ? `${message.content}\n\n（已取消生成）`
+        : '（已取消生成）'
+    },
+
     failMessage(index: number, error: string) {
       const message = this.messages[index]
       if (!message) return

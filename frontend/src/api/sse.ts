@@ -32,6 +32,7 @@ export async function streamChat(
   query: string,
   conversationId: number | null,
   handlers: StreamHandlers,
+  signal?: AbortSignal,
 ): Promise<void> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const token = getToken()
@@ -41,6 +42,7 @@ export async function streamChat(
     method: 'POST',
     headers,
     body: JSON.stringify({ query, stream: true, conversation_id: conversationId }),
+    signal,
   })
 
   if (response.status === 401) {
@@ -79,16 +81,22 @@ export async function streamChat(
     else if (event === 'error') handlers.onError?.(data.message ?? '未知错误')
   }
 
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    let index = buffer.indexOf('\n\n')
-    while (index >= 0) {
-      dispatch(buffer.slice(0, index))
-      buffer = buffer.slice(index + 2)
-      index = buffer.indexOf('\n\n')
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let index = buffer.indexOf('\n\n')
+      while (index >= 0) {
+        dispatch(buffer.slice(0, index))
+        buffer = buffer.slice(index + 2)
+        index = buffer.indexOf('\n\n')
+      }
     }
+    if (buffer.trim()) dispatch(buffer)
+  } catch (error: any) {
+    // 主动取消（切页/新对话）不算错误，静默退出；其他异常继续抛给调用方
+    if (error?.name === 'AbortError') return
+    throw error
   }
-  if (buffer.trim()) dispatch(buffer)
 }
