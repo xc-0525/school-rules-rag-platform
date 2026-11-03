@@ -115,6 +115,7 @@ class Settings:
     # ---- 工具副作用（P1-7）----
     ticket_idempotency_seconds: int = 600    # 同标题/描述窗口内复用同一工单
     ticket_require_intent: bool = True       # 用户没表达投诉/报修意图时不直接建单
+    campus_tools_enabled: bool = True        # 0=关闭校园服务只读工具，用于有/无工具消融实验
 
     # ---- 校园服务模块（报修 / 预约 / 失物招领，见 docs/campus-modules.md）----
     repair_per_user_per_day: int = 3         # 报修频率：同一用户每天最多提交条数
@@ -191,6 +192,7 @@ class Settings:
             cache_max_entries=_env_int("CACHE_MAX_ENTRIES", 1000),
             ticket_idempotency_seconds=_env_int("TICKET_IDEMPOTENCY_SECONDS", 600),
             ticket_require_intent=_env_flag("TICKET_REQUIRE_INTENT", True),
+            campus_tools_enabled=_env_flag("CAMPUS_TOOLS_ENABLED", True),
             repair_per_user_per_day=_env_int("REPAIR_PER_USER_PER_DAY", 3),
             repair_duplicate_hours=_env_int("REPAIR_DUPLICATE_HOURS", 24),
             reservation_days_ahead=_env_int("RESERVATION_DAYS_AHEAD", 7),

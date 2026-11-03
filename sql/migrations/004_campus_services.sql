@@ -69,11 +69,13 @@ CREATE TABLE IF NOT EXISTS lost_found_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 种子数据：给图书馆放几个可预约位置（幂等：只有空表才插入）
+-- 名称带"图书馆"前缀，保证学生口语提问（"明天图书馆还有位置吗"）能按名称命中，
+-- 见 005_location_naming.sql
 INSERT INTO reservable_locations (name, zone, capacity, is_active)
 SELECT * FROM (
-  SELECT '一楼自习区 A 区' AS name, '自习区' AS zone, 40 AS capacity, 1 AS is_active
-  UNION ALL SELECT '二楼研讨间 201', '研讨间', 6, 1
-  UNION ALL SELECT '二楼研讨间 202', '研讨间', 6, 1
-  UNION ALL SELECT '三楼电子阅览区', '电子阅览', 30, 1
+  SELECT '图书馆一楼自习区 A 区' AS name, '自习区' AS zone, 40 AS capacity, 1 AS is_active
+  UNION ALL SELECT '图书馆二楼研讨间 201', '研讨间', 6, 1
+  UNION ALL SELECT '图书馆二楼研讨间 202', '研讨间', 6, 1
+  UNION ALL SELECT '图书馆三楼电子阅览区', '电子阅览', 30, 1
 ) AS seed
 WHERE NOT EXISTS (SELECT 1 FROM reservable_locations);

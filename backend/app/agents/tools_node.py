@@ -12,11 +12,11 @@ import uuid
 from typing import Any
 
 from app.agents.prompting import _history_messages, _prompt_question
-from app.agents.prompts import SYSTEM_PROMPT, TOOL_SYSTEM_PROMPT
+from app.agents.prompts import SYSTEM_PROMPT, tool_system_prompt
 from app.agents.fusion import _evidence_key
 from app.agents.runtime import NodeContext
 from app.agents.state import AgentState
-from app.agents.tools import TOOL_DEFINITIONS, ToolRunner
+from app.agents.tools import ToolRunner, active_tool_definitions
 from app.schemas.chat import Evidence, SourceItem
 
 logger = logging.getLogger("app.agents")
@@ -26,7 +26,9 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     run_id = state.run_id or uuid.uuid4().hex[:12]
     runner = ToolRunner(ctx.services, ctx.settings)
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": TOOL_SYSTEM_PROMPT}]
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": tool_system_prompt(ctx.settings)}
+    ]
     messages.extend(_history_messages(state, limit=6))
     messages.append({"role": "user", "content": _prompt_question(state)})
 
@@ -37,7 +39,9 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
 
     for _ in range(max(1, ctx.settings.max_tool_rounds)):
         try:
-            assistant = await ctx.services.llm.chat_with_tools(messages, TOOL_DEFINITIONS)
+            assistant = await ctx.services.llm.chat_with_tools(
+                messages, active_tool_definitions(ctx.settings)
+            )
         except Exception:  # noqa: BLE001 —— LLM/Tool 故障时回退到确定性 RAG
             logger.exception("Tool Calling LLM 调用失败，回退标准 RAG")
             break

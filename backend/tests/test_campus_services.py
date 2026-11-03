@@ -175,7 +175,7 @@ class ReservationServiceTests(unittest.TestCase):
             self.settings, 1, location_id=2, res_date=TOMORROW, slot="afternoon"
         )
         self.assertEqual(created["status"], "reserved")
-        self.assertEqual(created["location_name"], "二楼研讨间 201")
+        self.assertEqual(created["location_name"], "图书馆二楼研讨间 201")
         self.assertEqual(created["slot_label"], "下午 12:00-17:00")
 
         board = res_service.availability(

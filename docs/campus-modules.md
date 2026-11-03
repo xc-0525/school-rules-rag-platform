@@ -218,10 +218,26 @@ pending_review ──approve──▶ published ──resolve(发布人/管理�
 审核流全路径、图片 URL 白名单、接口层 409/429/403 映射。
 全量后端测试 138 项通过。
 
-## 7. 后续扩展点（已预留，未实现）
+## 7. 问答接入（已实现，见 docs/工具接入改造指南.md）
 
-- **问答接入**：在 `agents/tools.py` 注册 `query_repair_status` / `query_my_reservations` /
-  `search_lost_found` 三个只读工具即可让学生"问"出进度——写入仍建议走页面（避免 LLM 自主提交脏数据）；
+四个只读工具已注册到 Tool Calling：`query_repair_status` / `query_my_reservations` /
+`query_location_availability` / `query_lost_found`。写操作仍只留在页面，模型不碰。
+
+消融开关 `CAMPUS_TOOLS_ENABLED`（默认 1）同时作用于三处，保证对照组干净：
+① 不下发工具定义；② 系统提示词裁掉校园工具清单与使用规则；③ 执行层拦截（模型幻觉调用也返回失败）。
+
+评测脚本新增 `--with-tools`，配套题集 `tests/golden/tool_set.json`（8 题）实测结果：
+
+| 配置 | 工具选对率 | RAG 对照题命中 | 被拒答题数 | p50 时延 |
+| --- | --- | --- | --- | --- |
+| 开启校园工具 | 1.000 | 1.000 | 0 | 3512 ms |
+| 关闭校园工具 | 0.125 | 1.000 | 4 | 3245 ms |
+
+关闭组 0.125 只来自 t08（RAG 对照题），说明 7 道实时业务题在无工具时全部拿不到数据；
+两组 RAG 对照题命中率均为 1.000，证明接入工具没有抢走 `search_rules` 的调用。
+
+## 8. 后续扩展点（已预留，未实现）
+
 - **违约限制**：`location_reservations` 已按用户落 no_show 记录，加一个计数查询即可实现"连续违约 N 次禁约"；
 - **报修图片**：`repair_requests` 预留 `handler_remark`，如需故障照片可复用失物招领的上传链路；
 - **消息通知**：三个模块的状态变更点（受理/完成/审批/冲突）都集中在 service 函数内，

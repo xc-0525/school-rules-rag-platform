@@ -81,10 +81,10 @@ def seed_mock_locations() -> list[dict[str, Any]]:
         if _mock_locations:
             return [dict(loc) for loc in _mock_locations]
         for name, zone, capacity in (
-            ("一楼自习区 A 区", "自习区", 40),
-            ("二楼研讨间 201", "研讨间", 6),
-            ("二楼研讨间 202", "研讨间", 6),
-            ("三楼电子阅览区", "电子阅览", 30),
+            ("图书馆一楼自习区 A 区", "自习区", 40),
+            ("图书馆二楼研讨间 201", "研讨间", 6),
+            ("图书馆二楼研讨间 202", "研讨间", 6),
+            ("图书馆三楼电子阅览区", "电子阅览", 30),
         ):
             _mock_loc_seq += 1
             _mock_locations.append(

@@ -21,7 +21,10 @@ from sqlalchemy.engine import make_url  # noqa: E402
 
 from app.core.config import Settings  # noqa: E402
 
-MIGRATION_SQL = Path(__file__).resolve().parents[2] / "sql" / "migrations" / "004_campus_services.sql"
+MIGRATION_FILES = [
+    Path(__file__).resolve().parents[2] / "sql" / "migrations" / "004_campus_services.sql",
+    Path(__file__).resolve().parents[2] / "sql" / "migrations" / "005_location_naming.sql",
+]
 
 
 def main() -> int:
@@ -33,9 +36,10 @@ def main() -> int:
     if not raw_url:
         print("错误：未配置 MYSQL_URL，也没有传 --url")
         return 1
-    if not MIGRATION_SQL.exists():
-        print(f"错误：找不到迁移文件 {MIGRATION_SQL}")
-        return 1
+    for migration in MIGRATION_FILES:
+        if not migration.exists():
+            print(f"错误：找不到迁移文件 {migration}")
+            return 1
 
     import pymysql
 
@@ -48,13 +52,14 @@ def main() -> int:
         database=url.database,
         charset="utf8mb4",
     )
-    statements = []
-    for chunk in MIGRATION_SQL.read_text(encoding="utf-8").split(";"):
-        # 去掉块内注释行，剩余内容才是真正的 SQL（否则注释前缀会让语句被整体跳过）
-        lines = [ln for ln in chunk.splitlines() if not ln.strip().startswith("--")]
-        sql = "\n".join(lines).strip()
-        if sql:
-            statements.append(sql)
+    statements: list[str] = []
+    for migration in MIGRATION_FILES:
+        for chunk in migration.read_text(encoding="utf-8").split(";"):
+            # 去掉块内注释行，剩余内容才是真正的 SQL（否则注释前缀会让语句被整体跳过）
+            lines = [ln for ln in chunk.splitlines() if not ln.strip().startswith("--")]
+            sql = "\n".join(lines).strip()
+            if sql:
+                statements.append(sql)
     try:
         with connection.cursor() as cursor:
             for stmt in statements:
