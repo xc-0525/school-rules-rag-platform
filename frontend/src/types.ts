@@ -269,7 +269,14 @@ export interface LocationItem {
 export interface SlotAvailability {
   slot: string
   label: string
+  /** 该时段是否已约满（remaining <= 0），保留兼容旧逻辑 */
   booked: boolean
+  /** 位置容量（自习区 40 / 研讨间 6 …） */
+  capacity?: number
+  /** 已被占用的预约数 */
+  booked_count?: number
+  /** 剩余可预约数 */
+  remaining?: number
 }
 
 export interface AvailabilityInfo {

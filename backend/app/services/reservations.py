@@ -46,11 +46,11 @@ class ReservationRuleError(ValueError):
 
 
 class SlotConflictError(Exception):
-    """目标时段已被占用（HTTP 409）。带占用者预约 id，便于排查。"""
+    """目标时段已被占满（HTTP 409）。带占用者预约 id，便于排查。"""
 
-    def __init__(self, reservation_id: int) -> None:
+    def __init__(self, reservation_id: int, message: str = "") -> None:
         self.reservation_id = reservation_id
-        super().__init__("该时段已被预约")
+        super().__init__(message or "该时段已被预约")
 
 
 # ---------------------------------------------------------------------------
@@ -81,9 +81,10 @@ def seed_mock_locations() -> list[dict[str, Any]]:
         if _mock_locations:
             return [dict(loc) for loc in _mock_locations]
         for name, zone, capacity in (
+            # 自习区/电子阅览按座位数；研讨间按“整间”预约，容量记 1
             ("图书馆一楼自习区 A 区", "自习区", 40),
-            ("图书馆二楼研讨间 201", "研讨间", 6),
-            ("图书馆二楼研讨间 202", "研讨间", 6),
+            ("图书馆二楼研讨间 201", "研讨间", 1),
+            ("图书馆二楼研讨间 202", "研讨间", 1),
             ("图书馆三楼电子阅览区", "电子阅览", 30),
         ):
             _mock_loc_seq += 1
@@ -178,28 +179,53 @@ def availability(
     location_id: int,
     res_date: str,
 ) -> dict[str, Any]:
-    """某位置某天各时段的占用情况。日期越界返回空原因说明。"""
+    """某位置某天各时段的占用与余量。日期越界返回空原因说明。
+
+    capacity 为位置可容纳人数（自习区 40、研讨间 6 等），remaining = capacity - 有效预约数。
+    booked 字段保留为“是否已约满”的布尔值，兼容老前端。
+    """
     start, end = _allowed_res_date_range(settings)
     try:
         target = date.fromisoformat(str(res_date or "").strip())
     except ValueError as exc:
         raise ReservationRuleError("日期格式应为 YYYY-MM-DD") from exc
 
-    booked: dict[str, Any] = {slot: False for slot in RESERVATION_SLOTS}
+    location = next(
+        (loc for loc in list_locations(settings, include_inactive=True) if int(loc["id"]) == int(location_id)),
+        None,
+    )
+    capacity = max(1, int((location or {}).get("capacity") or 1))
+    counts: dict[str, int] = {slot: 0 for slot in RESERVATION_SLOTS}
     reason = ""
     if target < start or target > end:
         reason = f"该日期不在可预约范围（{start.isoformat()} ~ {end.isoformat()}）"
     else:
         for row in _list_reservations(settings, all_users=True):
-            if row["location_id"] == location_id and _iso(row.get("res_date")) == target.isoformat() and row["status"] in ACTIVE_RESERVATION_STATUSES:
-                booked[row["slot"]] = True
+            if (
+                row["location_id"] == location_id
+                and _iso(row.get("res_date")) == target.isoformat()
+                and row["status"] in ACTIVE_RESERVATION_STATUSES
+            ):
+                counts[row["slot"]] = counts.get(row["slot"], 0) + 1
+
+    slots = []
+    for slot, label in RESERVATION_SLOTS.items():
+        used = counts.get(slot, 0)
+        remaining = max(0, capacity - used)
+        slots.append(
+            {
+                "slot": slot,
+                "label": label,
+                "capacity": capacity,
+                "booked_count": used,
+                "remaining": remaining,
+                "booked": remaining <= 0,
+            }
+        )
     return {
         "location_id": location_id,
         "date": target.isoformat(),
-        "slots": [
-            {"slot": slot, "label": label, "booked": booked[slot]}
-            for slot, label in RESERVATION_SLOTS.items()
-        ],
+        "slots": slots,
         "range_note": reason,
     }
 
@@ -255,7 +281,26 @@ def create_reservation(
             .with_for_update()
             .one()
         )
-        occupied = (
+        # 同一用户在同一位置同一时段不重复预约（否则会白占名额）
+        mine = (
+            session.query(LocationReservation)
+            .filter(
+                LocationReservation.location_id == location_id,
+                LocationReservation.res_date == target.isoformat(),
+                LocationReservation.slot == slot,
+                LocationReservation.user_id == user_id,
+                LocationReservation.status.in_(ACTIVE_RESERVATION_STATUSES),
+            )
+            .first()
+        )
+        if mine is not None:
+            raise SlotConflictError(
+                int(mine.id), "你在该时段已经预约过这个位置，无需重复预约"
+            )
+
+        # 容量校验：锁内计数，保证“查余量 + 插入”原子（uk_slot 唯一键已按容量模型移除）
+        capacity = max(1, int(getattr(locked, "capacity", 1) or 1))
+        used = (
             session.query(LocationReservation)
             .filter(
                 LocationReservation.location_id == location_id,
@@ -263,10 +308,13 @@ def create_reservation(
                 LocationReservation.slot == slot,
                 LocationReservation.status.in_(ACTIVE_RESERVATION_STATUSES),
             )
-            .first()
+            .count()
         )
-        if occupied is not None:
-            raise SlotConflictError(int(occupied.id))
+        if used >= capacity:
+            raise SlotConflictError(
+                -1,
+                f"{RESERVATION_SLOTS.get(slot, slot)} 已约满（{used}/{capacity}），请换一个时段或位置",
+            )
 
         row = LocationReservation(
             location_id=locked.id,
@@ -279,9 +327,9 @@ def create_reservation(
         try:
             session.commit()
         except IntegrityError as exc:
-            # 第二道防线：uk_slot 唯一键。回滚并映射为 409，而不是 500
+            # 兜底：并发下若计数与插入之间出现异常写入，仍映射为 409 而不是 500
             session.rollback()
-            raise SlotConflictError(-1) from exc
+            raise SlotConflictError(-1, "该时段已约满，请换一个时段或位置") from exc
         return get_reservation(settings, int(row.id), user_id, is_admin=True)  # type: ignore[return-value]
 
 
@@ -296,10 +344,12 @@ def _check_user_quota_mock(user_id: int, max_active: int) -> None:
 
 
 def _lock_and_insert_mock(user_id: int, location_id: int, target: date, slot: str) -> None:
-    """内存实现：_mock_lock 即临界区，检查与插入不可分割（等价 FOR UPDATE + UNIQUE）。"""
+    """内存实现：_mock_lock 即临界区，检查与插入不可分割（等价 FOR UPDATE 行锁）。"""
     location = _mock_location_by_id(location_id)
     if location is None or not location.get("is_active"):
         raise ReservationRuleError("位置不存在或暂未开放预约")
+    capacity = max(1, int(location.get("capacity") or 1))
+    used = 0
     for row in _mock_reservations:
         if (
             row["location_id"] == location_id
@@ -307,7 +357,16 @@ def _lock_and_insert_mock(user_id: int, location_id: int, target: date, slot: st
             and row["slot"] == slot
             and row["status"] in ACTIVE_RESERVATION_STATUSES
         ):
-            raise SlotConflictError(int(row["id"]))
+            if row["user_id"] == user_id:
+                raise SlotConflictError(
+                    int(row["id"]), "你在该时段已经预约过这个位置，无需重复预约"
+                )
+            used += 1
+    if used >= capacity:
+        raise SlotConflictError(
+            -1,
+            f"{RESERVATION_SLOTS.get(slot, slot)} 已约满（{used}/{capacity}），请换一个时段或位置",
+        )
     global _mock_res_seq
     _mock_res_seq += 1
     _mock_reservations.append(

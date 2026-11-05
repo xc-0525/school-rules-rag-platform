@@ -76,7 +76,7 @@ def build_router(settings: Settings) -> APIRouter:
             raise HTTPException(
                 status_code=409,
                 detail={
-                    "message": "手慢了，该时段刚被别人预约成功，请换一个时段或位置",
+                    "message": str(exc) or "手慢了，该时段刚被别人约满，请换一个时段或位置",
                     "conflict_reservation_id": exc.reservation_id,
                 },
             ) from exc

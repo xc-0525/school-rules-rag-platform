@@ -45,7 +45,7 @@
         <div class="reserve-layout">
           <div class="reserve-left">
             <div class="muted" style="margin-bottom: 8px">
-              可预约 {{ tomorrow }} 起未来 7 天的时段；一个时段一个位置，冲突时后到者失败
+              可预约 {{ tomorrow }} 起未来 7 天的时段；每个时段剩余名额实时显示，约满后不可再约
             </div>
             <div
               v-for="loc in locations"
@@ -80,7 +80,10 @@
                   plain
                   @click="book(selectedLocation!, s.slot)"
                 >
-                  {{ s.label }}{{ s.booked ? '（已约满）' : '' }}
+                  {{ s.label }}
+                  <span class="slot-left" :class="{ full: s.booked }">
+                    {{ s.booked ? '已约满' : `余 ${s.remaining ?? '-'}/${s.capacity ?? '-'}` }}
+                  </span>
                 </el-button>
               </div>
               <div v-if="availability.range_note" class="muted">{{ availability.range_note }}</div>
@@ -196,6 +199,31 @@
       </template>
     </el-dialog>
 
+    <!-- 关闭报修弹窗（管理员）：常见原因下拉，可选可输入 -->
+    <el-dialog v-model="closeDialog" title="关闭报修申请" width="500px" :close-on-click-modal="false">
+      <el-form label-width="72px">
+        <el-form-item label="工单">
+          <span>{{ closeTarget?.title }}（{{ closeTarget?.building }} {{ closeTarget?.room }}）</span>
+        </el-form-item>
+        <el-form-item label="原因" required>
+          <el-select
+            v-model="closeRemark"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择常见原因，或直接输入"
+            style="width: 100%"
+          >
+            <el-option v-for="reason in CLOSE_PRESETS" :key="reason" :label="reason" :value="reason" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div class="muted" style="font-size: 12px">关闭后学生可在“我的报修”看到该原因，且不能再被受理</div>
+      <template #footer>
+        <el-button @click="closeDialog = false">取消</el-button>
+        <el-button type="danger" :loading="closeLoading" @click="confirmCloseRepair">确认关闭</el-button>
+      </template>
+    </el-dialog>
     <!-- 失物招领发布弹窗 -->
     <el-dialog v-model="lfDialog" :title="lfForm.kind === 'lost' ? '发布失物（我丢了东西）' : '发布招领（我捡到东西）'" width="560px" :close-on-click-modal="false">
       <el-form :model="lfForm" label-width="90px">
@@ -273,6 +301,19 @@ const repairAll = ref(false)
 const repairDialog = ref(false)
 const repairForm = ref({ title: '', category: 'other', building: '', room: '', contact: '', description: '' })
 
+/** 管理员关闭报修的快捷原因（可点选，也可直接输入自定义） */
+const closeDialog = ref(false)
+const closeTarget = ref<RepairItem | null>(null)
+const closeRemark = ref('')
+const closeLoading = ref(false)
+const CLOSE_PRESETS = [
+  '设备已恢复正常，无需维修',
+  '信息不实或重复提交',
+  '学生已自行处理',
+  '非本部门职责范围，已转交',
+  '多次联系不上报修人',
+]
+
 const REPAIR_STATUS: Record<string, { label: string; type: 'warning' | 'primary' | 'success' | 'info' }> = {
   pending: { label: '待受理', type: 'warning' },
   processing: { label: '处理中', type: 'primary' },
@@ -317,16 +358,13 @@ async function submitRepair() {
 async function actRepair(item: RepairItem, action: 'process' | 'complete' | 'close' | 'cancel') {
   let remark = ''
   if (action === 'close') {
-    try {
-      const { value } = await ElMessageBox.prompt('关闭工单必须填写原因', `关闭「${item.title}」`, {
-        inputPattern: /\S+/,
-        inputErrorMessage: '原因不能为空',
-      })
-      remark = value
-    } catch {
-      return
-    }
-  } else if (action === 'process') {
+    // 关闭走专用弹窗：常见原因下拉可点选，也允许直接输入
+    closeTarget.value = item
+    closeRemark.value = ''
+    closeDialog.value = true
+    return
+  }
+  if (action === 'process') {
     try {
       const { value } = await ElMessageBox.prompt('受理备注（可选，如已派维修师傅）', `受理「${item.title}」`, {
         inputPlaceholder: '选填',
@@ -342,6 +380,28 @@ async function actRepair(item: RepairItem, action: 'process' | 'complete' | 'clo
     await loadRepairs()
   } catch (error: any) {
     ElMessage.error(`${error?.message || error}`)
+  }
+}
+
+/** 关闭弹窗确认：原因必填，提交后写入 handler_remark */
+async function confirmCloseRepair() {
+  const target = closeTarget.value
+  const remark = closeRemark.value.trim()
+  if (!target) return
+  if (!remark) {
+    ElMessage.warning('请选择或填写关闭原因')
+    return
+  }
+  closeLoading.value = true
+  try {
+    await transitionRepair(target.id, 'close', remark)
+    ElMessage.success('已关闭该报修申请')
+    closeDialog.value = false
+    await loadRepairs()
+  } catch (error: any) {
+    ElMessage.error(`${error?.message || error}`)
+  } finally {
+    closeLoading.value = false
   }
 }
 
@@ -639,6 +699,21 @@ onMounted(() => {
   gap: 10px;
   flex-wrap: wrap;
   margin: 12px 0;
+}
+
+/* 时段按钮上的余量角标：可约=绿，满员=灰 */
+.slot-left {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: rgba(47, 111, 237, 0.12);
+  color: var(--brand);
+}
+
+.slot-left.full {
+  background: rgba(144, 147, 153, 0.16);
+  color: #909399;
 }
 
 .lf-images {

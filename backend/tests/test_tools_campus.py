@@ -124,7 +124,12 @@ class CampusToolTests(unittest.IsolatedAsyncioTestCase):
             "query_location_availability", {"location": target["name"], "date": TOMORROW}
         )
         self.assertIn("下午", again.summary)
-        self.assertNotIn("上午 08:00-12:00", again.summary, "已占用时段不应出现在可预约列表")
+        # 可预约列表里不应再出现上午；余量明细要显示 0/1（研讨间容量 1）
+        free_line = next(
+            line for line in again.summary.splitlines() if "可预约" in line
+        )
+        self.assertNotIn("上午", free_line, "已约满的时段不应出现在可预约列表")
+        self.assertIn("上午 08:00-12:00 余 0/1", again.summary, "余量明细应显示已满")
 
     async def test_availability_bad_date_degrades(self) -> None:
         # 昨天不在可预约范围：工具不抛异常，给出说明性结果
@@ -178,7 +183,7 @@ class CampusToolTests(unittest.IsolatedAsyncioTestCase):
             user_id=1,
         )
         self.assertFalse(result.success)
-        self.assertIn("已被约满", result.summary)
+        self.assertIn("已约满", result.summary)
         self.assertIn("可改为", result.summary)
 
     async def test_reservation_draft_rejects_bad_date_and_quota(self) -> None:

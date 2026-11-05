@@ -851,16 +851,22 @@ class ToolRunner:
                 logger.exception("availability failed: %s", loc.get("name"))
                 continue
             free = [slot["label"] for slot in data["slots"] if not slot["booked"]]
+            detail_bits = [
+                f"{slot['label']} 余 {slot.get('remaining', 0)}/{slot.get('capacity', 1)}"
+                for slot in data["slots"]
+            ]
             head = f"{loc.get('name', '')}（{loc.get('zone', '')}）{res_date}"
             if data.get("range_note"):
                 lines.append(f"{head}：{data['range_note']}")
             else:
                 lines.append(f"{head}：可预约 {('、'.join(free) or '无')}")
+                lines.append("  " + "；".join(detail_bits))
             payload.append(
                 {
                     "location": loc.get("name"),
                     "date": res_date,
                     "free_slots": free,
+                    "slots": data["slots"],
                     "range_note": data.get("range_note", ""),
                 }
             )
@@ -1057,19 +1063,25 @@ class ToolRunner:
         if chosen is None:
             return self._draft_error("create_reservation_draft", arguments, "时段参数不合法。")
         if chosen["booked"]:
-            free = [item["label"] for item in board["slots"] if not item["booked"]]
+            free = [
+                f"{item['label']}（余 {item.get('remaining', 0)}）"
+                for item in board["slots"]
+                if not item["booked"]
+            ]
             return self._draft_error(
                 "create_reservation_draft",
                 arguments,
-                f"{location['name']} 在 {target_date.isoformat()} 的{chosen['label']}已被约满，"
+                f"{location['name']} 在 {target_date.isoformat()} 的{chosen['label']}"
+                f" 已约满（{chosen.get('booked_count', 0)}/{chosen.get('capacity', 1)}），"
                 + ("可改为：" + "、".join(free) if free else "该日已无空余时段，请换一天。"),
             )
 
         slot_label = chosen["label"]
+        remaining = int(chosen.get("remaining", 1))
         summary = (
             f"已生成预约草稿（尚未占用座位）：\n"
             f"位置：{location['name']}（{location.get('zone', '')}）\n"
-            f"时间：{target_date.isoformat()} {slot_label}\n"
+            f"时间：{target_date.isoformat()} {slot_label}（当前余 {remaining} 个位置）\n"
             "请点击下方“确认预约”按钮完成预约；不确认不会写入预约记录。"
         )
         return ToolResult(

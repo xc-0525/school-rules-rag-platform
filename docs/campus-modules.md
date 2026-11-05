@@ -12,7 +12,7 @@
 | --- | --- | --- | --- |
 | 文档在线预览 | `api/v1/documents.py`（新增 preview 路由） | 复用 `documents` | 类型白名单 + 目录穿越防御 |
 | 寝室报修 | `services/repairs.py` | `repair_requests` | 每日限额 + 同位同型判重 |
-| 图书馆预约 | `services/reservations.py` | `reservable_locations` + `location_reservations` | 行锁 + 唯一键双防线 |
+| 图书馆预约 | `services/reservations.py` | `reservable_locations` + `location_reservations` | 行锁 + 容量计数（不再用唯一键） |
 | 失物招领 | `services/lostfound.py` | `lost_found_items` | 先审后发 + 图片白名单校验 |
 
 迁移：`sql/migrations/004_campus_services.sql`（全部 `CREATE TABLE IF NOT EXISTS`，可重复执行），
@@ -98,9 +98,10 @@
 
 ### 3.1 数据模型
 
-- `reservable_locations`：位置（名称/分区/容量/是否开放），迁移自带 4 条种子数据；
+- `reservable_locations`：位置（名称/分区/**容量**/是否开放），迁移自带 4 条种子数据。
+  容量语义：自习区 40、电子阅览 30（按座位数）；研讨间 1（按整间）。
 - `location_reservations`：`(location_id, res_date, slot)` + `status`；
-  **`UNIQUE KEY uk_slot (location_id, res_date, slot)` 是防超卖的最终防线**。
+  一个时段可被多人预约，直到占满 `capacity`（迁移 006 移除了早期的一人独占唯一键）。
 - 时段为固定三段：`morning / afternoon / evening`（扩展新时段改枚举表即可）。
 
 ### 3.2 时间规则
@@ -108,13 +109,16 @@
 **只允许预约「明天」起 `RESERVATION_DAYS_AHEAD`（默认 7）天内的时段**；
 日期范围由服务端本地时钟计算，客户端传参只做格式与范围校验（今天/过去/超范围 → 400）。
 
-### 3.3 并发控制（两道防线）
+### 3.3 并发控制（按容量占用）
 
 1. **事务内行锁**：`SELECT ... FROM reservable_locations WHERE id=? FOR UPDATE`
-   锁住位置行 → 锁内检查该 (location, date, slot) 是否已有有效预约 → 无则插入。
-   并发请求在锁上串行化，检查与插入不可分割；
-2. **数据库唯一键**：即使应用层检查被绕过（多实例/未来分片），插入时也只有一个成功，
-   其余抛 `IntegrityError`，事务回滚。
+   锁住位置行 → 锁内 `COUNT` 该 (location, date, slot) 的有效预约数 → 未满 `capacity` 才插入。
+   并发请求在锁上串行化，计数与插入不可分割，不会超卖；
+2. **兜底**：`INSERT` 异常统一回滚并映射为 409（不再依赖唯一键，因为一个时段允许多人）；
+3. **同人不重复**：同一用户在同一位置同一时段已有有效预约时直接 409，避免白占名额。
+
+`GET /reservations/availability` 返回每个时段的 `capacity / booked_count / remaining`，
+`booked` 字段保留为“是否已满”的布尔兼容值。
 
 **冲突处理**：统一捕获后映射为 **HTTP 409**（detail 含 `message` 与 `conflict_reservation_id`），
 前端提示"手慢了，该时段刚被别人预约成功"，并自动刷新时段占用表；绝不把 500 暴露给用户。

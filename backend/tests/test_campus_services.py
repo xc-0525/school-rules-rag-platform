@@ -186,12 +186,13 @@ class ReservationServiceTests(unittest.TestCase):
         self.assertFalse(booked["morning"])
 
     def test_conflict_then_cancel_then_retry(self) -> None:
+        # 研讨间按整间预约（容量 1），第二人必然冲突
         res_service.create_reservation(
-            self.settings, 1, location_id=1, res_date=TOMORROW, slot="morning"
+            self.settings, 1, location_id=2, res_date=TOMORROW, slot="morning"
         )
         with self.assertRaises(res_service.SlotConflictError):
             res_service.create_reservation(
-                self.settings, 2, location_id=1, res_date=TOMORROW, slot="morning"
+                self.settings, 2, location_id=2, res_date=TOMORROW, slot="morning"
             )
         # 取消后他人可以约同一时段
         mine = res_service.list_reservations(self.settings, user_id=1, is_admin=False)
@@ -199,9 +200,32 @@ class ReservationServiceTests(unittest.TestCase):
             self.settings, mine[0]["id"], 1, is_admin=False, action="cancel"
         )
         ok = res_service.create_reservation(
-            self.settings, 2, location_id=1, res_date=TOMORROW, slot="morning"
+            self.settings, 2, location_id=2, res_date=TOMORROW, slot="morning"
         )
         self.assertEqual(ok["user_id"], 2)
+
+    def test_capacity_allows_multiple_until_full(self) -> None:
+        """自习区容量 40：多人可约同一时段，余量随之递减。"""
+        for user_id in (1, 2, 3):
+            res_service.create_reservation(
+                self.settings, user_id, location_id=1, res_date=TOMORROW, slot="morning"
+            )
+        board = res_service.availability(self.settings, location_id=1, res_date=TOMORROW)
+        morning = next(s for s in board["slots"] if s["slot"] == "morning")
+        self.assertEqual(morning["capacity"], 40)
+        self.assertEqual(morning["booked_count"], 3)
+        self.assertEqual(morning["remaining"], 37)
+        self.assertFalse(morning["booked"], "未满时不应标记为已约满")
+
+    def test_same_user_cannot_book_same_slot_twice(self) -> None:
+        res_service.create_reservation(
+            self.settings, 1, location_id=1, res_date=TOMORROW, slot="morning"
+        )
+        with self.assertRaises(res_service.SlotConflictError) as ctx:
+            res_service.create_reservation(
+                self.settings, 1, location_id=1, res_date=TOMORROW, slot="morning"
+            )
+        self.assertIn("已经预约过", str(ctx.exception))
 
     def test_active_quota(self) -> None:
         slots = ["morning", "afternoon", "evening"]
@@ -382,16 +406,18 @@ class CampusApiTests(unittest.TestCase):
         locations = client.get("/api/v1/reservations/locations", headers=a)
         self.assertEqual(locations.status_code, 200, locations.text)
         self.assertGreaterEqual(len(locations.json()), 1, "种子位置可用")
+        # 容量 1 的研讨间（整间预约）才能用“第二人冲突”验证 409
+        room = next(loc for loc in locations.json() if loc["capacity"] == 1)
 
         first = client.post(
             "/api/v1/reservations",
-            json={"location_id": locations.json()[0]["id"], "res_date": TOMORROW, "slot": "morning"},
+            json={"location_id": room["id"], "res_date": TOMORROW, "slot": "morning"},
             headers=a,
         )
         self.assertEqual(first.status_code, 201, first.text)
         conflict = client.post(
             "/api/v1/reservations",
-            json={"location_id": locations.json()[0]["id"], "res_date": TOMORROW, "slot": "morning"},
+            json={"location_id": room["id"], "res_date": TOMORROW, "slot": "morning"},
             headers=b,
         )
         self.assertEqual(conflict.status_code, 409)

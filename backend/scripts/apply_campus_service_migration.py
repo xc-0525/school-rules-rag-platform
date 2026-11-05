@@ -65,6 +65,37 @@ def main() -> int:
             for stmt in statements:
                 cursor.execute(stmt)
         connection.commit()
+
+        # 006：预约改为按容量占用，需要去掉 uk_slot 唯一键（存在性判断保证幂等）
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM information_schema.STATISTICS "
+                "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='location_reservations' AND INDEX_NAME=%s",
+                (url.database, "uk_slot"),
+            )
+            if cursor.fetchone()[0]:
+                cursor.execute("ALTER TABLE location_reservations DROP INDEX uk_slot")
+                print("  移除唯一键 uk_slot（改为按容量占用）")
+            cursor.execute(
+                "SELECT COUNT(*) FROM information_schema.STATISTICS "
+                "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='location_reservations' AND INDEX_NAME=%s",
+                (url.database, "idx_res_slot"),
+            )
+            if not cursor.fetchone()[0]:
+                cursor.execute(
+                    "ALTER TABLE location_reservations "
+                    "ADD KEY idx_res_slot (location_id, res_date, slot, status)"
+                )
+                print("  新增索引 idx_res_slot")
+            # 006：研讨间按整间预约（容量 1），自习区/电子阅览仍按座位数
+            cursor.execute(
+                "UPDATE reservable_locations SET capacity = 1 "
+                "WHERE zone = '研讨间' AND capacity <> 1"
+            )
+            if cursor.rowcount:
+                print(f"  研讨间容量改为 1（{cursor.rowcount} 条）")
+        connection.commit()
+
         ok = True
         with connection.cursor() as cursor:
             for table in ("repair_requests", "reservable_locations", "location_reservations", "lost_found_items"):
