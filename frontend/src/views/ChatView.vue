@@ -15,13 +15,25 @@
       <div v-if="!store.messages.length" class="welcome">
         <h2>问点什么？</h2>
         <p>
-          系统会同时检索 <b>Qdrant 向量库</b> 与 <b>Neo4j 知识图谱</b>，
+          校纪校规、办事流程、校园通知都可以问。系统会同时检索
+          <b>Qdrant 向量库</b> 与 <b>Neo4j 知识图谱</b>，
           经证据融合、充分性判定后，由 DeepSeek 生成带条款来源的回答。
         </p>
+        <div class="welcome-tags">
+          <span class="welcome-tag">向量检索</span>
+          <span class="welcome-tag">知识图谱</span>
+          <span class="welcome-tag">多智能体协作</span>
+        </div>
         <div class="examples">
-          <el-button v-for="question in examples" :key="question" round @click="useExample(question)">
-            {{ question }}
-          </el-button>
+          <button
+            v-for="(question, i) in examples"
+            :key="question"
+            class="example-card"
+            @click="useExample(question)"
+          >
+            <span class="example-index">{{ String(i + 1).padStart(2, '0') }}</span>
+            <span>{{ question }}</span>
+          </button>
         </div>
         <div class="hint">
           演示路径：Agent 轨迹（并行召回 / 充分性选择 / 查询扩展循环）→ 来源引用 → 点赞点踩

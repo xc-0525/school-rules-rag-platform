@@ -359,6 +359,34 @@
         <el-button type="primary" :loading="saving" @click="submitLf">提交审核</el-button>
       </template>
     </el-dialog>
+
+    <!-- 失物招领驳回：常规原因下拉可点选，也允许直接输入 -->
+    <el-dialog v-model="lfRejectDialog" title="驳回失物招领" width="500px" :close-on-click-modal="false">
+      <el-form label-width="72px">
+        <el-form-item label="条目">
+          <span>{{ lfRejectTarget?.title }}</span>
+        </el-form-item>
+        <el-form-item label="原因" required>
+          <el-select
+            v-model="lfRejectReason"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择常见原因，或直接输入"
+            style="width: 100%"
+          >
+            <el-option v-for="item in LF_REJECT_PRESETS" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div class="muted" style="font-size: 12px">
+        驳回原因会显示在发布者的条目标签下，请写明需要补充或修改的内容。
+      </div>
+      <template #footer>
+        <el-button @click="lfRejectDialog = false">取消</el-button>
+        <el-button type="danger" :loading="lfRejectLoading" @click="confirmRejectLf">确认驳回</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -710,6 +738,20 @@ const lfDialog = ref(false)
 const pendingCount = ref(0)
 const lfForm = ref({ kind: 'found', title: '', location: '', contact: '', description: '', image_urls: [] as string[] })
 
+/** 管理员驳回：常见原因可点选，也允许自由输入（写 review_remark） */
+const lfRejectDialog = ref(false)
+const lfRejectTarget = ref<LostFoundItem | null>(null)
+const lfRejectReason = ref('')
+const lfRejectLoading = ref(false)
+const LF_REJECT_PRESETS = [
+  '信息不完整，请补充物品特征与丢失/拾获地点',
+  '描述过于笼统，无法核实，请补充细节',
+  '联系方式无效，无法联系失主或拾获人',
+  '疑似重复发布，请合并为一条',
+  '含身份证号、银行卡号等隐私信息，请打码后重提',
+  '不属于失物招领范围，请通过其他渠道处理',
+]
+
 const lfTabLabel = computed(() =>
   auth.isAdmin && pendingCount.value > 0
     ? `失物招领（${pendingCount.value} 条待审）`
@@ -803,16 +845,13 @@ async function submitLf() {
 async function reviewLf(item: LostFoundItem, action: 'approve' | 'reject' | 'remove') {
   let remark = ''
   if (action === 'reject') {
-    try {
-      const { value } = await ElMessageBox.prompt('驳回必须填写理由', `驳回「${item.title}」`, {
-        inputPattern: /\S+/,
-        inputErrorMessage: '理由不能为空',
-      })
-      remark = value
-    } catch {
-      return
-    }
-  } else if (action === 'remove') {
+    // 驳回走专用弹窗：常见原因下拉可点选，也允许直接输入
+    lfRejectTarget.value = item
+    lfRejectReason.value = ''
+    lfRejectDialog.value = true
+    return
+  }
+  if (action === 'remove') {
     try {
       await ElMessageBox.confirm(`下架「${item.title}」？`, '下架', { type: 'warning' })
     } catch {
@@ -825,6 +864,28 @@ async function reviewLf(item: LostFoundItem, action: 'approve' | 'reject' | 'rem
     await loadLostFound()
   } catch (error: any) {
     ElMessage.error(`${error?.message || error}`)
+  }
+}
+
+/** 驳回弹窗确认：原因必填，提交后写入 review_remark，学生端可见 */
+async function confirmRejectLf() {
+  const target = lfRejectTarget.value
+  const remark = lfRejectReason.value.trim()
+  if (!target) return
+  if (!remark) {
+    ElMessage.warning('请选择或填写驳回原因')
+    return
+  }
+  lfRejectLoading.value = true
+  try {
+    await reviewLostFound(target.id, 'reject', remark)
+    ElMessage.success('已驳回该条失物招领')
+    lfRejectDialog.value = false
+    await loadLostFound()
+  } catch (error: any) {
+    ElMessage.error(`${error?.message || error}`)
+  } finally {
+    lfRejectLoading.value = false
   }
 }
 
