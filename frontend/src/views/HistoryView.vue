@@ -34,7 +34,7 @@
 
           <MessageBubble
             v-for="(message, index) in displayMessages"
-            :key="index"
+            :key="message.id ?? `hist-${index}`"
             :message="message"
             @feedback="(rating) => onFeedback(message, rating)"
           />

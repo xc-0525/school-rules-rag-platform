@@ -79,10 +79,10 @@
 
         <div class="panel-title" style="margin-top: 16px">已知限制</div>
         <div class="about-list muted">
-          <div>· 尚无登录鉴权（演示固定用户 id=1）</div>
-          <div>· 扫描件 PDF 需安装 OCR 引擎</div>
-          <div>· 语义缓存实际为问题归一化精确匹配</div>
-          <div>· 本地 MySQL 为 5.5.11，建表脚本已兼容</div>
+          <div>· 登录鉴权已上线：学生 / 管理员双角色，文档管理仅管理员可操作</div>
+          <div>· 扫描件 PDF 需另装 OCR 引擎（未安装时上传会提示，文档页可查引擎状态）</div>
+          <div>· 语义缓存实为「问题归一化 + 精确匹配」，不是向量相似度缓存</div>
+          <div>· 本地 MySQL 为 5.5.11，建表脚本已做兼容</div>
         </div>
       </div>
     </el-col>

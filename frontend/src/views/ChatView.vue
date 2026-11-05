@@ -11,7 +11,7 @@
       </div>
     </div>
 
-    <div ref="scrollRef" class="chat-messages">
+    <div ref="scrollRef" class="chat-messages" @scroll="onScroll">
       <div v-if="!store.messages.length" class="welcome">
         <h2>问点什么？</h2>
         <p>
@@ -26,13 +26,13 @@
         </div>
         <div class="examples">
           <button
-            v-for="(question, i) in examples"
-            :key="question"
+            v-for="item in examples"
+            :key="item.q"
             class="example-card"
-            @click="useExample(question)"
+            @click="useExample(item.q)"
           >
-            <span class="example-index">{{ String(i + 1).padStart(2, '0') }}</span>
-            <span>{{ question }}</span>
+            <span class="example-text">{{ item.q }}</span>
+            <span v-if="item.tag" class="example-tag">{{ item.tag }}</span>
           </button>
         </div>
         <div class="hint">
@@ -49,17 +49,28 @@
       />
     </div>
 
+    <!-- 用户上翻阅读时不再抢滚动，改为按钮回到最新 -->
+    <transition name="fade">
+      <button v-if="!nearBottom" class="scroll-bottom" @click="jumpToBottom">
+        回到底部 ↓
+      </button>
+    </transition>
+
     <div class="chat-input">
       <el-input
         v-model="input"
         type="textarea"
         :rows="2"
         resize="none"
-        :disabled="store.busy"
-        placeholder="输入问题，例如：宿舍晚上几点熄灯？（Enter 发送，Shift+Enter 换行）"
-        @keydown.enter.exact.prevent="send"
+        :placeholder="
+          store.busy
+            ? '正在生成回答，可以先写下一个问题（完成后发送）'
+            : '输入问题，例如：宿舍晚上几点熄灯？（Enter 发送，Shift+Enter 换行）'
+        "
+        @keydown.enter.exact="onEnterKey"
       />
-      <el-button type="primary" size="large" :loading="store.busy" @click="send">发送</el-button>
+      <el-button v-if="store.busy" size="large" @click="stop">停止</el-button>
+      <el-button v-else type="primary" size="large" @click="send">发送</el-button>
     </div>
   </div>
 </template>
@@ -84,27 +95,57 @@ import type { Message, ToolDraft } from '../types'
 const store = useChatStore()
 const input = ref('')
 const scrollRef = ref<HTMLElement | null>(null)
+/** 用户是否停留在底部附近；离开后暂停自动跟随，避免边读边被拽回 */
+const nearBottom = ref(true)
 // 当前在途问答的取消句柄：切页或开新对话时中止，避免前端白等、后端白算
 let controller: AbortController | null = null
 
+/**
+ * 第 5 条是刻意留的「防幻觉拒答」演示，加角标说明，
+ * 避免新用户以为系统答不上来。
+ */
 const examples = [
-  '宿舍晚上几点熄灯？',
-  '考试时带手机进考场会怎么处理？',
-  '国家奖学金需要什么条件？',
-  '图书馆开放时间是什么时候？',
-  '今天天气怎么样？',
+  { q: '宿舍晚上几点熄灯？' },
+  { q: '考试时带手机进考场会怎么处理？' },
+  { q: '国家奖学金需要什么条件？' },
+  { q: '图书馆开放时间是什么时候？' },
+  { q: '今天天气怎么样？', tag: '拒答演示' },
 ]
 
-function scrollToBottom() {
+function scrollToBottom(behavior: ScrollBehavior = 'auto') {
   nextTick(() => {
     const element = scrollRef.value
-    if (element) element.scrollTop = element.scrollHeight
+    if (element) element.scrollTo({ top: element.scrollHeight, behavior })
   })
+}
+
+function onScroll() {
+  const element = scrollRef.value
+  if (!element) return
+  nearBottom.value = element.scrollHeight - element.scrollTop - element.clientHeight < 80
+}
+
+function jumpToBottom() {
+  nearBottom.value = true
+  scrollToBottom('smooth')
+}
+
+/** 中文输入法选词回车时 keydown 仍是 Enter，必须放行让候选词上屏 */
+function onEnterKey(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  send()
+}
+
+function stop() {
+  controller?.abort()
 }
 
 watch(
   () => store.messages.map((message) => message.content.length).join('|'),
-  scrollToBottom,
+  () => {
+    if (nearBottom.value) scrollToBottom()
+  },
 )
 
 async function send() {
@@ -115,6 +156,7 @@ async function send() {
   const assistantIndex = store.addAssistantPlaceholder()
   input.value = ''
   store.busy = true
+  nearBottom.value = true
   scrollToBottom()
 
   controller = new AbortController()
@@ -136,7 +178,7 @@ async function send() {
         if (payload.conversation_id) {
           store.conversationId = payload.conversation_id
         }
-        scrollToBottom()
+        if (nearBottom.value) scrollToBottom()
       },
       onError: (message) => store.failMessage(assistantIndex, message),
     }, controller.signal)
@@ -149,7 +191,7 @@ async function send() {
   } finally {
     controller = null
     store.busy = false
-    scrollToBottom()
+    if (nearBottom.value) scrollToBottom()
   }
 }
 

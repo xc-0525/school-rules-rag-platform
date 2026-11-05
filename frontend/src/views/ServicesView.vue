@@ -966,7 +966,7 @@ onMounted(() => {
 
 .location-card.active {
   border-color: var(--brand);
-  background: rgba(47, 111, 237, 0.06);
+  background: rgba(138, 28, 28, 0.06);
 }
 
 .slot-row {
@@ -982,7 +982,7 @@ onMounted(() => {
   padding: 1px 6px;
   border-radius: 8px;
   font-size: 12px;
-  background: rgba(47, 111, 237, 0.12);
+  background: rgba(138, 28, 28, 0.1);
   color: var(--brand);
 }
 

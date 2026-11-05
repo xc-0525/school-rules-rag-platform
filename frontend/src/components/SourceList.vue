@@ -19,13 +19,62 @@
         <span class="source-name">{{ source.title }}</span>
       </div>
       <div class="source-detail">{{ source.detail }}</div>
-      <div class="source-snippet">{{ source.snippet }}</div>
+      <div
+        :ref="(el) => setSnippetRef(el, index)"
+        class="source-snippet"
+        :class="{ 'is-expanded': expanded[index] }"
+      >
+        {{ source.snippet }}
+      </div>
+      <button
+        v-if="hasOverflow[index]"
+        type="button"
+        class="snippet-toggle"
+        @click="toggle(index)"
+      >
+        {{ expanded[index] ? '收起' : '展开全文' }}
+      </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { nextTick, onMounted, ref, watch } from 'vue'
 import type { SourceItem } from '../types'
 
-defineProps<{ sources?: SourceItem[] | null; refused?: boolean }>()
+const props = defineProps<{ sources?: SourceItem[] | null; refused?: boolean }>()
+
+const expanded = ref<Record<number, boolean>>({})
+/** 只有真的被 3 行裁掉才给展开入口，避免短条款出现无效按钮 */
+const hasOverflow = ref<Record<number, boolean>>({})
+const snippetEls = new Map<number, HTMLElement>()
+
+function setSnippetRef(el: unknown, index: number) {
+  if (el) snippetEls.set(index, el as HTMLElement)
+  else snippetEls.delete(index)
+}
+
+function measureOverflow() {
+  const next: Record<number, boolean> = {}
+  snippetEls.forEach((el, index) => {
+    next[index] = el.scrollHeight - el.clientHeight > 2
+  })
+  hasOverflow.value = next
+}
+
+function toggle(index: number) {
+  expanded.value = { ...expanded.value, [index]: !expanded.value[index] }
+}
+
+onMounted(() => nextTick(measureOverflow))
+
+watch(
+  () => props.sources,
+  () => {
+    expanded.value = {}
+    snippetEls.clear()
+    nextTick(measureOverflow)
+  },
+  { deep: true },
+)
 </script>

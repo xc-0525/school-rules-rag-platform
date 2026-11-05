@@ -116,7 +116,7 @@ const rendered = computed<RenderedItem[]>(() => {
         tool: event.tool,
         argsText: event.arguments ? JSON.stringify(event.arguments) : '',
         running: true,
-        color: '#409eff',
+        color: 'var(--el-color-primary)',
         time,
       })
     } else if (event.phase === 'tool_end') {
@@ -127,7 +127,7 @@ const rendered = computed<RenderedItem[]>(() => {
         success: !!event.success,
         summary: event.summary,
         latency_ms: event.latency_ms ?? null,
-        color: event.success ? '#67c23a' : '#f56c6c',
+        color: event.success ? 'var(--el-color-success)' : 'var(--el-color-danger)',
         time,
       })
     } else if (event.phase === 'start') {
@@ -139,7 +139,7 @@ const rendered = computed<RenderedItem[]>(() => {
         kind: event.kind,
         running: true,
         latency_ms: null,
-        color: '#409eff',
+        color: 'var(--el-color-primary)',
         time,
       }
       items.push(item)
@@ -149,7 +149,7 @@ const rendered = computed<RenderedItem[]>(() => {
       if (item) {
         item.running = false
         item.latency_ms = event.latency_ms ?? null
-        item.color = '#67c23a'
+        item.color = 'var(--el-color-success)'
       }
     } else if (event.phase === 'route') {
       const reason = event.reason || ''
@@ -158,7 +158,7 @@ const rendered = computed<RenderedItem[]>(() => {
         type: 'route',
         text: `${event.from} → ${event.to ?? '结束'}${reason ? `（${reason}）` : ''}`,
         loop,
-        color: loop ? '#e6a23c' : '#67c23a',
+        color: loop ? 'var(--el-color-warning)' : 'var(--el-color-success)',
         time,
       })
     }

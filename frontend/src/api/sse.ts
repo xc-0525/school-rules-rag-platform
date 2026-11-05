@@ -94,9 +94,9 @@ export async function streamChat(
       }
     }
     if (buffer.trim()) dispatch(buffer)
-  } catch (error: any) {
-    // 主动取消（切页/新对话）不算错误，静默退出；其他异常继续抛给调用方
-    if (error?.name === 'AbortError') return
+  } catch (error) {
+    // 主动取消也要抛给调用方：调用方负责把占位消息标记为「已取消生成」，
+    // 若在这里静默 return，气泡会永远停在“正在生成”状态。
     throw error
   }
 }

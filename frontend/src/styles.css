@@ -115,6 +115,8 @@ body {
 
 .app-shell {
   height: 100vh;
+  /* 移动端地址栏伸缩时 100vh 会遮挡输入区，dvh 优先 */
+  height: 100dvh;
 }
 
 /* ---------------- 侧栏 ---------------- */
@@ -167,34 +169,18 @@ body {
 }
 
 /* 兼容旧结构里的文字方块 */
-.brand-logo {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #9b2626, #6f1414);
-  color: #fff;
-  font-family: var(--font-serif);
-  font-size: 20px;
-  font-weight: 700;
-}
-
 .brand-school {
   margin-top: 15px;
-  font-family: var(--font-serif);
   font-size: 17px;
   font-weight: 600;
-  letter-spacing: 2.6px;
+  letter-spacing: 2.4px;
   color: #f3eee2;
 }
 
 .brand-en {
-  margin-top: 5px;
-  font-size: 8px;
-  letter-spacing: 0.28px;
-  white-space: nowrap;
+  margin-top: 6px;
+  font-size: 9px;
+  letter-spacing: 0.16px;
   color: rgba(194, 161, 91, 0.78);
 }
 
@@ -235,9 +221,9 @@ body {
 
 .menu-group {
   padding: 14px 10px 6px;
-  font-size: 10px;
-  letter-spacing: 2.4px;
-  color: rgba(226, 232, 240, 0.32);
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: rgba(226, 232, 240, 0.36);
 }
 
 .app-menu .el-menu-item {
@@ -336,9 +322,8 @@ body {
 
 .aside-motto {
   margin: 13px 0 2px;
-  font-family: var(--font-serif);
   font-size: 11.5px;
-  letter-spacing: 3px;
+  letter-spacing: 2.6px;
   color: rgba(194, 161, 91, 0.88);
 }
 
@@ -456,16 +441,17 @@ body {
   letter-spacing: 0.3px;
 }
 
+/* 与顶栏的绛红竖条区分：内容区标题用金线，避免同一种装饰重复出现 */
 .panel-title::before {
   content: '';
   position: absolute;
   left: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 3px;
-  height: 14px;
+  width: 2px;
+  height: 13px;
   border-radius: 2px;
-  background: linear-gradient(180deg, #a83838, var(--brand));
+  background: linear-gradient(180deg, #d9bd7a, #a9822f);
 }
 
 .muted {
@@ -672,13 +658,6 @@ body {
   color: var(--muted);
 }
 
-.login-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 26px;
-}
-
 .login-tabs .el-tabs__header {
   margin-bottom: 22px;
 }
@@ -717,6 +696,7 @@ body {
 
 /* ---------------- 聊天页 ---------------- */
 .chat-page {
+  position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -749,7 +729,42 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 24px 28px;
-  scroll-behavior: smooth;
+}
+
+/* 用户上翻阅读时出现，点击回到最新回答 */
+.scroll-bottom {
+  position: absolute;
+  right: 26px;
+  bottom: 104px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(20, 24, 31, 0.12);
+  backdrop-filter: blur(6px);
+}
+
+.scroll-bottom:hover {
+  border-color: rgba(31, 58, 95, 0.4);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
 }
 
 .welcome {
@@ -804,7 +819,8 @@ body {
 .example-card {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 10px;
   padding: 13px 16px;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -823,11 +839,15 @@ body {
   transform: translateY(-1px);
 }
 
-.example-index {
+.example-tag {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  color: var(--gold);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 
 .hint {
@@ -1268,11 +1288,23 @@ body {
 @media (max-width: 768px) {
   .notice-banner {
     flex-wrap: wrap;
+    gap: 6px 8px;
     padding: 8px 12px;
   }
 
+  /* 窄屏只保留标题做提醒，正文进公告页再看，避免横幅撑成三行 */
+  .notice-banner-body {
+    gap: 0;
+  }
+
+  .notice-banner-title {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .notice-banner-text {
-    white-space: normal;
+    display: none;
   }
 }
 
@@ -1393,11 +1425,34 @@ body {
 }
 
 .source-snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
   font-size: 12.5px;
   color: #475569;
   line-height: 1.7;
-  max-height: 72px;
-  overflow: hidden;
+}
+
+.source-snippet.is-expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.snippet-toggle {
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.snippet-toggle:hover {
+  text-decoration: underline;
 }
 
 .page-grid {
@@ -1458,13 +1513,6 @@ body {
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
-}
-
-.upload-box {
-  border: 1px dashed var(--border-strong);
-  border-radius: 14px;
-  padding: 18px;
-  background: #fbfaf7;
 }
 
 .upload-hint {
@@ -1575,10 +1623,49 @@ body {
   .examples {
     grid-template-columns: 1fr;
   }
+
+  /* 窄屏优先保住页面标题与主要操作，技术标签让位 */
+  .page-title {
+    padding-right: 8px;
+    font-size: 15px;
+    white-space: nowrap;
+  }
+
+  .header-right .meta-chip.is-muted {
+    display: none;
+  }
 }
 
 /* 预约二次确认：保留位置/日期/时段三行展示（MessageBox 挂在 body，需全局样式） */
 .reserve-confirm-box .el-message-box__message {
   white-space: pre-line;
   line-height: 1.7;
+}
+
+/* ---------------- 键盘可达性与动效降级 ---------------- */
+.example-card:focus-visible,
+.scroll-bottom:focus-visible,
+.snippet-toggle:focus-visible,
+.notice-banner-close:focus-visible,
+.app-menu .el-menu-item:focus-visible {
+  outline: 2px solid rgba(31, 58, 95, 0.45);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-fade-enter-active,
+  .banner-slide-enter-active,
+  .banner-slide-leave-active,
+  .fade-enter-active,
+  .fade-leave-active {
+    transition: none;
+  }
+
+  .typing .dot {
+    animation: none;
+  }
+
+  .example-card:hover {
+    transform: none;
+  }
 }
