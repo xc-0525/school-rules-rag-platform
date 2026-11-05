@@ -73,6 +73,7 @@ class ToolRunnerTests(unittest.TestCase):
                 "query_my_reservations",
                 "query_location_availability",
                 "query_lost_found",
+                "create_reservation_draft",
             },
         )
 

@@ -96,6 +96,12 @@ export const useChatStore = defineStore('chat', {
       if (message) message.ticketNo = ticketNo
     },
 
+    /** 预约确认成功后记录预约 id，按钮变为只读 */
+    setReservationNo(index: number, reservationId: number) {
+      const message = this.messages[index]
+      if (message) message.reservationNo = reservationId
+    },
+
     /** 用户主动取消（切页/新对话）时收尾，不当作错误 */
     cancelMessage(index: number) {
       const message = this.messages[index]

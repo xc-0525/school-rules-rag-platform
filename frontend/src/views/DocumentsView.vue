@@ -37,7 +37,14 @@
       <div class="upload-hint">
         支持 <b>.md / .txt / 文字版 .pdf</b>；上传走原始字节流（不做 base64），服务端边收边落盘。<br />
         后端需要以真实模式运行（<code>VECTOR_MODE=qdrant</code> + Neo4j 已启动），首次入库会预热 BGE，可能较慢。<br />
-        扫描件 PDF 需要额外安装 OCR 引擎（<code>rapidocr_onnxruntime</code>），否则会返回"需要 OCR"的提示。
+        <span v-if="ocr.available" style="color: #15803d">
+          ✓ 已启用 OCR（{{ ocr.engine }}）：扫描件 PDF 会自动识别后再入库，每页约 3-6 秒。
+        </span>
+        <span v-else-if="ocr.checked" style="color: #b45309">
+          ⚠ 未检测到 OCR 引擎：扫描件 PDF 无法入库，请执行
+          <code>pip install rapidocr_onnxruntime pillow</code> 后重启后端。
+        </span>
+        <span v-else>正在检测 OCR 引擎…</span>
       </div>
     </el-alert>
 
@@ -80,13 +87,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { deleteDocument, fetchDocumentPreviewUrl, fetchDocuments, uploadDocumentRaw } from '../api/client'
+import { deleteDocument, fetchDocumentPreviewUrl, fetchDocuments, fetchOcrStatus, uploadDocumentRaw } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { DocumentItem } from '../types'
+import type { DocumentItem, UploadResult } from '../types'
 
 const auth = useAuthStore()
+/** OCR 引擎状态（动态检测，避免写死“需要安装”误导） */
+const ocr = ref({ available: false, engine: '', hint: '', checked: false })
 const documents = ref<DocumentItem[]>([])
 
 const totalChunks = computed(() =>
@@ -142,9 +151,9 @@ async function upload(file: File) {
       title: title.value.trim() || undefined,
       replace: replace.value,
     })
-    ElMessage.success(`入库成功：#${result.document_id} ${result.title}，共 ${result.chunk_count} 条`)
     title.value = ''
     await load()
+    showDedupeReport(result)
   } catch (error: any) {
     ElMessage.error(`入库失败：${error?.message || error}`)
   } finally {
@@ -161,6 +170,62 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+/** 上传后的去重报告：告诉管理员这次新增了哪些条例、跳过了哪些重复 */
+async function showDedupeReport(result: UploadResult) {
+  const info = result.dedupe
+  if (!info) {
+    ElMessage.success(`入库成功：#${result.document_id} ${result.title}，共 ${result.chunk_count} 条`)
+    return
+  }
+
+  const blocks: any[] = [
+    h(
+      'p',
+      { style: 'margin:0 0 10px;font-size:13px;color:#374151' },
+      `解析出 ${info.total} 条条款：新增 ${info.added} 条，跳过重复 ${info.duplicates} 条。`,
+    ),
+  ]
+  if (info.skipped_all) {
+    blocks.push(
+      h(
+        'p',
+        { style: 'margin:0 0 8px;color:#b45309;font-size:13px' },
+        '全部条款均已在库中，本次没有新增内容（未创建重复文档）。',
+      ),
+    )
+  }
+  const items = info.added_items.slice(0, 20)
+  if (items.length) {
+    blocks.push(
+      h(
+        'div',
+        { style: 'max-height:280px;overflow:auto;font-size:13px;line-height:1.7' },
+        items.map((item, index) =>
+          h(
+            'div',
+            { style: 'padding:4px 0;border-bottom:1px dashed #eef2f7' },
+            `${index + 1}. ${item.label}：${item.snippet}`,
+          ),
+        ),
+      ),
+    )
+  }
+  if (info.added_items.length > items.length) {
+    blocks.push(
+      h(
+        'p',
+        { style: 'margin:8px 0 0;font-size:12px;color:#6b7280' },
+        `… 另有 ${info.added_items.length - items.length} 条新增条例未展示`,
+      ),
+    )
+  }
+
+  await ElMessageBox.alert(h('div', blocks), info.skipped_all ? '未新增条例' : '本次新增条例', {
+    confirmButtonText: '知道了',
+    customStyle: { maxWidth: '560px' },
+  }).catch(() => {})
 }
 
 /** 在线预览原件：fetch 带 token 拉字节流 → objectURL 新窗口打开（只读） */
@@ -215,4 +280,13 @@ async function remove(row: DocumentItem) {
 }
 
 onMounted(load)
+
+onMounted(async () => {
+  try {
+    const status = await fetchOcrStatus()
+    ocr.value = { ...status, checked: true }
+  } catch {
+    ocr.value = { available: false, engine: '', hint: '', checked: true }
+  }
+})
 </script>

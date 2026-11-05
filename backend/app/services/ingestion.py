@@ -14,6 +14,7 @@ rules_parser 解析 → MySQL documents/chunks → BGE 向量化 → Qdrant upse
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -23,9 +24,22 @@ from typing import Any
 from app.core.config import BASE_DIR, Settings
 from app.db.session import new_session
 from app.services.embedding import BGEEmbedder
-from app.services.rules_parser import ParsedDocument, load_documents
+from app.services.rules_parser import ParsedChunk, ParsedDocument, load_documents
 
 logger = logging.getLogger("app.ingestion")
+
+
+_ARTICLE_PREFIX = re.compile(r"^第[0-9一二三四五六七八九十百]+条(?:之[一二三四五六七八九十]+)?")
+
+
+def _dedupe_key(chapter: str, content: str) -> str:  # noqa: ARG001 —— 章节仅用于展示，不参与判重
+    """去重键：条款正文（去掉"第N条"编号与所有空白）。
+
+    md 解析出来的是纯正文，PDF 解析会保留"第N条"前缀，按原文比较永远判不出重复；
+    章节名也因解析器不同（"正文" vs ""）不可靠，因此只用正文做键。
+    """
+    text = _ARTICLE_PREFIX.sub("", (content or "").strip())
+    return re.sub(r"\s+", "", text)
 
 DEMO_USER_ID = 1
 
@@ -55,6 +69,27 @@ def _resolve_path(path: str, default: str) -> str:
     value = path or default
     candidate = Path(value)
     return str(candidate if candidate.is_absolute() else (BASE_DIR / candidate).resolve())
+
+
+@dataclass
+class DedupeReport:
+    """条款级去重结果：告诉管理员这次到底新增了哪些条例。"""
+
+    total: int = 0
+    added: int = 0
+    duplicates: int = 0
+    added_items: list[dict[str, str]] | None = None
+    duplicate_items: list[dict[str, str]] | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "total": self.total,
+            "added": self.added,
+            "duplicates": self.duplicates,
+            "added_items": self.added_items or [],
+            "duplicate_items": self.duplicate_items or [],
+            "skipped_all": self.added == 0 and self.duplicates > 0,
+        }
 
 
 @dataclass
@@ -133,16 +168,120 @@ class RulesIngestor:
         document: ParsedDocument,
         replace: bool = True,
         uploaded_by: int | None = None,
+        dedupe: bool = True,
     ) -> dict[str, Any]:
         """上传接口入口：入库单个已解析文档，返回 document_id 等信息。
 
         uploaded_by 由路由层传入（P0-1 修复：此前写死 user_id=1，
         导致所有文档都记在 admin 名下，且 dev 模式的匿名上传无法追溯）。
+
+        dedupe=True 时先做条款级去重（与库中已有条款比较，同名文件替换时排除自身），
+        只把真正新增的条款写进三库，并返回 DedupeReport 供管理端展示。
         """
         self.preflight()
-        if replace:
+        report: DedupeReport | None = None
+        # 只有"目标文件名确实已存在"才算覆盖：此时旧文档马上被删，
+        # 与库比较会把未变更条款判重丢掉，所以只做文档内去重；
+        # 新文件即使前端勾了"同名覆盖"也要跨库去重，否则去重形同虚设。
+        replacing = replace and self._file_name_exists(document.file_name)
+        if dedupe:
+            document, report = self._dedupe_document(document, compare_with_db=not replacing)
+        if not document.chunks:
+            # 全部条款都已存在：不创建空文档记录
+            return {
+                "document_id": 0,
+                "title": document.title,
+                "file_name": document.file_name,
+                "chunk_count": 0,
+                "chapters": 0,
+                "skipped_all": True,
+                "dedupe": report.as_dict() if report else None,
+            }
+        if replacing:
             self._delete_by_file_name(document.file_name)
-        return self._ingest_document(document, uploaded_by)
+        outcome = self._ingest_document(document, uploaded_by)
+        outcome["skipped_all"] = False
+        outcome["dedupe"] = report.as_dict() if report else None
+        return outcome
+
+    def _dedupe_document(
+        self, document: ParsedDocument, compare_with_db: bool = True
+    ) -> tuple[ParsedDocument, DedupeReport]:
+        """过滤与库中重复、以及同一文档内重复的条款。
+
+        判定键 = 章节 + 条款正文（去空白）。只比正文会误杀不同章节里的同名短句，
+        加上章节能保证"同一条条款"才被判重。
+
+        compare_with_db=False（同名覆盖）：只做文档内去重，交给随后整份替换。
+        """
+        existing = self._existing_chunk_keys() if compare_with_db else set()
+        kept: list[ParsedChunk] = []
+        added_items: list[dict[str, str]] = []
+        duplicate_items: list[dict[str, str]] = []
+        seen = set(existing)
+
+        for chunk in document.chunks:
+            label = f"{chunk.chapter} {chunk.article}".strip() or "条款"
+            key = _dedupe_key(chunk.chapter, chunk.content)
+            item = {"label": label, "chapter": chunk.chapter, "snippet": chunk.content[:80]}
+            if key in seen:
+                duplicate_items.append(item)
+                continue
+            seen.add(key)
+            kept.append(
+                ParsedChunk(
+                    chapter=chunk.chapter,
+                    article=chunk.article,
+                    content=chunk.content,
+                    chunk_index=len(kept) + 1,
+                )
+            )
+            added_items.append(item)
+
+        cleaned = ParsedDocument(
+            title=document.title,
+            file_name=document.file_name,
+            file_path=document.file_path,
+            file_type=document.file_type,
+            chunks=kept,
+        )
+        report = DedupeReport(
+            total=len(document.chunks),
+            added=len(kept),
+            duplicates=len(duplicate_items),
+            added_items=added_items,
+            duplicate_items=duplicate_items,
+        )
+        logger.info(
+            "去重完成 %s：解析 %d 条，新增 %d 条，跳过重复 %d 条",
+            document.file_name,
+            report.total,
+            report.added,
+            report.duplicates,
+        )
+        return cleaned, report
+
+    def _file_name_exists(self, file_name: str) -> bool:
+        """库里是否已有同名文档（决定是"覆盖"还是"新增"）。"""
+        from app.db.models import Document
+
+        with new_session(self.mysql_url) as session:
+            return (
+                session.query(Document.id).filter(Document.file_name == file_name).first()
+                is not None
+            )
+
+    def _existing_chunk_keys(self) -> set[str]:
+        """库里已有条款的去重键。"""
+        from app.db.models import Chunk, Document
+
+        with new_session(self.mysql_url) as session:
+            rows = (
+                session.query(Chunk.chapter, Chunk.content)
+                .join(Document, Document.id == Chunk.document_id)
+                .all()
+            )
+        return {_dedupe_key(chapter or "", content or "") for chapter, content in rows}
 
     # ------------------------------------------------------------ 依赖预检
     def preflight(self) -> None:

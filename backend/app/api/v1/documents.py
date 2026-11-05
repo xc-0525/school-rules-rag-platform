@@ -271,6 +271,20 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         if hasattr(services.cache, "clear"):
             services.cache.clear()
 
+        dedupe = result.get("dedupe")
+        if result.get("skipped_all"):
+            message = (
+                f"全部 {dedupe['total']} 条条款均已在库中，未重复入库"
+                if dedupe
+                else "全部条款均已存在，未重复入库"
+            )
+        elif replace:
+            message = "入库成功（同名文件已替换）"
+        else:
+            message = "入库成功"
+        if dedupe and not result.get("skipped_all"):
+            message = f"新增 {dedupe['added']} 条，跳过重复 {dedupe['duplicates']} 条"
+
         return DocumentUploadResponse(
             document_id=result["document_id"],
             title=result["title"],
@@ -278,7 +292,8 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
             chunk_count=result["chunk_count"],
             chapters=result["chapters"],
             status="done",
-            message="入库成功（同名文件已替换）" if replace else "入库成功",
+            message=message,
+            dedupe=dedupe,
         )
 
     # ---------------- JSON 上传（默认可用，无需任何新依赖） ----------------
@@ -402,6 +417,24 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
     async def list_documents(user: AuthUser = Depends(current_user)):
         require_mysql()
         return await asyncio.to_thread(_list_documents_sync, settings.mysql_url)
+
+    @router.get(
+        "/documents/meta/ocr-status",
+        summary="OCR 引擎状态（前端据此显示提示，而不是写死“需要安装”）",
+    )
+    async def ocr_status_api(user: AuthUser = Depends(current_user)):  # noqa: ARG001
+        from app.services.ocr_parser import ocr_available
+
+        available = ocr_available()
+        return {
+            "available": available,
+            "engine": "RapidOCR(onnxruntime)" if available else "",
+            "hint": (
+                "已启用 OCR：扫描件 PDF 会自动识别并入库"
+                if available
+                else "未安装 OCR 引擎：扫描件 PDF 无法入库，请执行 pip install rapidocr_onnxruntime pillow"
+            ),
+        }
 
     @router.get(
         "/documents/{document_id}/preview",

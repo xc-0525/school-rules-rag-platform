@@ -9,6 +9,7 @@ import type {
   LostFoundItem,
   NoticeCategoryOption,
   NoticeItem,
+  OcrStatus,
   RepairItem,
   ReservationItem,
   UploadedImage,
@@ -42,7 +43,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let message = `HTTP ${response.status}`
     try {
       const data = await response.json()
-      message = data.detail || data.message || message
+      // 409 等冲突的 detail 是对象（{message, conflict_reservation_id}），取 message 避免 [object Object]
+      const detail = data.detail ?? data.message
+      message = typeof detail === 'object' && detail !== null ? detail.message || message : detail || message
     } catch {
       /* ignore */
     }
@@ -138,6 +141,11 @@ export function fetchNotices(query: NoticeQuery = {}): Promise<NoticeItem[]> {
 
 export function fetchNoticeCategories(): Promise<NoticeCategoryOption[]> {
   return request<NoticeCategoryOption[]>('/api/v1/notices/meta/categories')
+}
+
+/** OCR 引擎是否可用（扫描件 PDF 入库依赖它） */
+export function fetchOcrStatus(): Promise<OcrStatus> {
+  return request<OcrStatus>('/api/v1/documents/meta/ocr-status')
 }
 
 /** 顶部紧急横幅：urgent + 置顶 + 生效中的公告 */

@@ -147,6 +147,68 @@ class CampusToolTests(unittest.IsolatedAsyncioTestCase):
         other = await self._run("query_my_reservations", {}, user_id=2)
         self.assertEqual(other.payload["reservations"], [])
 
+    async def test_reservation_draft_is_not_written(self) -> None:
+        """预约草稿只组装 payload，不落库；确认动作由前端按钮触发。"""
+        result = await self._run(
+            "create_reservation_draft",
+            {"location": "研讨间 201", "date": TOMORROW, "slot": "下午"},
+            user_id=1,
+        )
+        self.assertTrue(result.success, result.summary)
+        payload = result.payload
+        self.assertTrue(payload["requires_confirmation"])
+        self.assertEqual(payload["action"], "create_reservation")
+        self.assertEqual(payload["slot"], "afternoon")
+        self.assertEqual(payload["res_date"], TOMORROW)
+        self.assertIn("尚未占用座位", result.summary)
+        # 关键：不产生任何预约记录
+        self.assertEqual(
+            res_service.list_reservations(self.settings, user_id=1, is_admin=False), []
+        )
+
+    async def test_reservation_draft_conflict_suggests_free_slot(self) -> None:
+        locations = res_service.list_locations(self.settings)
+        target = next(loc for loc in locations if "研讨间 201" in loc["name"])
+        res_service.create_reservation(
+            self.settings, 9, location_id=target["id"], res_date=TOMORROW, slot="morning"
+        )
+        result = await self._run(
+            "create_reservation_draft",
+            {"location": "研讨间 201", "date": TOMORROW, "slot": "morning"},
+            user_id=1,
+        )
+        self.assertFalse(result.success)
+        self.assertIn("已被约满", result.summary)
+        self.assertIn("可改为", result.summary)
+
+    async def test_reservation_draft_rejects_bad_date_and_quota(self) -> None:
+        past = (date.today() - timedelta(days=1)).isoformat()
+        bad = await self._run(
+            "create_reservation_draft",
+            {"location": "图书馆", "date": past, "slot": "morning"},
+            user_id=1,
+        )
+        self.assertFalse(bad.success)
+        self.assertIn("只能预约", bad.summary)
+
+        # 占满 3 个有效预约后再生成草稿 → 提示先取消
+        locations = res_service.list_locations(self.settings)
+        for offset, slot in enumerate(("morning", "afternoon", "evening")):
+            res_service.create_reservation(
+                self.settings,
+                1,
+                location_id=locations[0]["id"],
+                res_date=(date.today() + timedelta(days=1 + offset)).isoformat(),
+                slot=slot,
+            )
+        full = await self._run(
+            "create_reservation_draft",
+            {"location": "图书馆一楼自习区", "date": TOMORROW, "slot": "morning"},
+            user_id=1,
+        )
+        self.assertFalse(full.success)
+        self.assertIn("最多同时保留", full.summary)
+
 
     async def test_disabled_tool_not_executed(self) -> None:
         """关闭开关后：下发定义被裁掉，模型即便幻觉出工具名也不执行。"""
@@ -161,7 +223,7 @@ class ToolDefinitionTests(unittest.TestCase):
     def test_ablation_switch(self) -> None:
         settings = make_settings()
         names = [d["function"]["name"] for d in active_tool_definitions(settings)]
-        self.assertEqual(len(names), 7)
+        self.assertEqual(len(names), 8)
         for name in tools_module.CAMPUS_TOOL_NAMES:
             self.assertIn(name, names)
 

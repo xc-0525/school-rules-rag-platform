@@ -105,7 +105,23 @@ CAMPUS_TOOL_NAMES = (
     "query_my_reservations",
     "query_location_availability",
     "query_lost_found",
+    "create_reservation_draft",
 )
+
+# 写操作只生成"待确认草稿"，由前端确认按钮落到 POST /api/v1/reservations
+CAMPUS_DRAFT_TOOL_NAMES = ("create_reservation_draft",)
+
+SLOT_ALIASES = {
+    "上午": "morning",
+    "早上": "morning",
+    "下午": "afternoon",
+    "中午": "afternoon",
+    "晚上": "evening",
+    "晚间": "evening",
+    "morning": "morning",
+    "afternoon": "afternoon",
+    "evening": "evening",
+}
 
 CAMPUS_TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -198,6 +214,31 @@ CAMPUS_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_reservation_draft",
+            "description": (
+                "为当前用户生成图书馆/场馆预约草稿（不会真正预约，必须由用户在界面上点“确认预约”）。"
+                "适用于“帮我约明天下午的研讨间”“订一个明天上午的自习座位”。"
+                "调用前如不确定位置或时段，可先用 query_location_availability 查询。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "位置名称关键词，如 图书馆/研讨间/自习"},
+                    "date": {"type": "string", "description": "日期 YYYY-MM-DD；不传默认明天"},
+                    "slot": {
+                        "type": "string",
+                        "enum": ["morning", "afternoon", "evening"],
+                        "description": "时段：上午/下午/晚上",
+                    },
+                },
+                "required": ["location", "slot"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 TOOL_DEFINITIONS.extend(CAMPUS_TOOL_DEFINITIONS)
@@ -266,6 +307,8 @@ class ToolRunner:
                 result = await self._query_location_availability(arguments)
             elif name == "query_lost_found":
                 result = await self._query_lost_found(arguments, user_id)
+            elif name == "create_reservation_draft":
+                result = await self._create_reservation_draft(arguments, user_id)
             else:
                 result = ToolResult(
                     name=name,
@@ -747,6 +790,151 @@ class ToolRunner:
                 for row in rows
             ],
             payload={"items": rows},
+        )
+
+    async def _create_reservation_draft(
+        self, arguments: dict[str, Any], user_id: int
+    ) -> ToolResult:
+        """生成预约草稿：只校验 + 组装 payload，不写库。
+
+        真正的写入由用户在聊天里点“确认预约”，前端调 POST /api/v1/reservations；
+        这样模型不会把“我想约”变成“已约”（脏数据），也能复用后端的并发/配额校验。
+        """
+        from app.services import reservations as reservation_service
+
+        keyword = str(arguments.get("location") or "").strip()
+        slot_raw = str(arguments.get("slot") or "").strip()
+        slot = SLOT_ALIASES.get(slot_raw.lower(), SLOT_ALIASES.get(slot_raw, ""))
+        res_date = str(arguments.get("date") or "").strip() or (
+            datetime.now().date() + timedelta(days=1)
+        ).isoformat()
+
+        if not keyword:
+            return self._draft_error("create_reservation_draft", arguments, "请先告诉我要预约哪个位置（如研讨间、自习区）。")
+        if not slot:
+            return self._draft_error(
+                "create_reservation_draft", arguments, "请选择时段：上午、下午或晚上。"
+            )
+
+        # 日期范围与格式先校验（availability 对越界日期是软失败）
+        days_ahead = max(1, int(getattr(self.settings, "reservation_days_ahead", 7)))
+        start = date.today() + timedelta(days=1)
+        end = start + timedelta(days=days_ahead - 1)
+        try:
+            target_date = date.fromisoformat(res_date)
+        except ValueError:
+            return self._draft_error(
+                "create_reservation_draft", arguments, "日期格式应为 YYYY-MM-DD。"
+            )
+        if not (start <= target_date <= end):
+            return self._draft_error(
+                "create_reservation_draft",
+                arguments,
+                f"只能预约 {start.isoformat()} 至 {end.isoformat()} 的时段，请换个日期。",
+            )
+
+        try:
+            locations = await asyncio.to_thread(
+                lambda: reservation_service.list_locations(self.settings)
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("create_reservation_draft list_locations failed")
+            locations = []
+        matched = [loc for loc in locations if keyword in str(loc.get("name", ""))]
+        if not matched:
+            return self._draft_error(
+                "create_reservation_draft",
+                arguments,
+                f"没有找到名称包含“{keyword}”的可预约位置，可用位置："
+                + "、".join(str(loc.get("name", "")) for loc in locations[:5]),
+            )
+        location = matched[0]
+
+        # 配额预检：避免用户点了“确认预约”才被 429 拒绝
+        max_active = max(1, int(getattr(self.settings, "reservation_max_active_per_user", 3)))
+        try:
+            active = await asyncio.to_thread(
+                lambda: reservation_service.list_reservations(
+                    self.settings, user_id=user_id, is_admin=False, status="reserved", limit=50
+                )
+            )
+        except Exception:  # noqa: BLE001 —— 查不到就当没配额限制，交给确认接口兜底
+            logger.exception("create_reservation_draft quota check failed")
+            active = []
+        if len(active) >= max_active:
+            return self._draft_error(
+                "create_reservation_draft",
+                arguments,
+                f"你已有 {len(active)} 个有效预约，最多同时保留 {max_active} 个；"
+                "请先取消一个（可问“我预约了哪些”）再预约。",
+            )
+
+        try:
+            board = await asyncio.to_thread(
+                lambda: reservation_service.availability(
+                    self.settings, location_id=location["id"], res_date=target_date.isoformat()
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("create_reservation_draft availability failed")
+            return self._draft_error(
+                "create_reservation_draft", arguments, f"暂时无法查询该时段余量：{exc}"
+            )
+        slot_map = {item["slot"]: item for item in board["slots"]}
+        chosen = slot_map.get(slot)
+        if chosen is None:
+            return self._draft_error("create_reservation_draft", arguments, "时段参数不合法。")
+        if chosen["booked"]:
+            free = [item["label"] for item in board["slots"] if not item["booked"]]
+            return self._draft_error(
+                "create_reservation_draft",
+                arguments,
+                f"{location['name']} 在 {target_date.isoformat()} 的{chosen['label']}已被约满，"
+                + ("可改为：" + "、".join(free) if free else "该日已无空余时段，请换一天。"),
+            )
+
+        slot_label = chosen["label"]
+        summary = (
+            f"已生成预约草稿（尚未占用座位）：\n"
+            f"位置：{location['name']}（{location.get('zone', '')}）\n"
+            f"时间：{target_date.isoformat()} {slot_label}\n"
+            "请点击下方“确认预约”按钮完成预约；不确认不会写入预约记录。"
+        )
+        return ToolResult(
+            name="create_reservation_draft",
+            arguments={"location": keyword, "date": target_date.isoformat(), "slot": slot},
+            success=True,
+            summary=summary,
+            sources=[
+                SourceItem(
+                    type="tool",
+                    title=f"预约草稿：{location['name']}",
+                    detail=f"{target_date.isoformat()} {slot_label}",
+                    snippet="待确认，未写入预约记录",
+                )
+            ],
+            payload={
+                "requires_confirmation": True,
+                "action": "create_reservation",
+                # 复用 tools_node 的草稿去重键（title/description/category）
+                "title": location["name"],
+                "description": f"{target_date.isoformat()} {slot_label}",
+                "category": "图书馆预约",
+                "location_id": int(location["id"]),
+                "res_date": target_date.isoformat(),
+                "slot": slot,
+                "slot_label": slot_label,
+            },
+        )
+
+    def _draft_error(
+        self, name: str, arguments: dict[str, Any], message: str
+    ) -> ToolResult:
+        return ToolResult(
+            name=name,
+            arguments=arguments,
+            success=False,
+            summary=message,
         )
 
     # ------------------------------------------------------------------ 审计日志

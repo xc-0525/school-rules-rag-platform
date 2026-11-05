@@ -45,13 +45,23 @@ export interface RuntimeInfo {
   latency_ms: number
 }
 
-export interface TicketDraft {
-  status: string
+export interface ToolDraft {
+  status?: string
   requires_confirmation: boolean
+  /** 决定前端确认按钮的行为：工单走 POST /tickets，预约走 POST /reservations */
+  action?: 'create_ticket' | 'create_reservation'
   title: string
   description: string
   category: string
+  /** 预约草稿专用 */
+  location_id?: number
+  res_date?: string
+  slot?: string
+  slot_label?: string
 }
+
+/** 兼容旧命名 */
+export type TicketDraft = ToolDraft
 
 export interface ChatDonePayload {
   answer: string
@@ -90,10 +100,12 @@ export interface Message {
   runtime?: RuntimeInfo
   pending?: boolean
   error?: string
-  /** 待确认的工单草稿 */
-  toolDrafts?: TicketDraft[]
+  /** 待确认的操作草稿（工单 / 预约） */
+  toolDrafts?: ToolDraft[]
   /** 确认后拿到的工单号 */
   ticketNo?: string
+  /** 确认后拿到的预约记录号 */
+  reservationNo?: number
 }
 
 export interface NoticeItem {
@@ -174,6 +186,21 @@ export interface HealthInfo {
   }
 }
 
+export interface DedupeItem {
+  label: string
+  chapter: string
+  snippet: string
+}
+
+export interface DedupeInfo {
+  total: number
+  added: number
+  duplicates: number
+  added_items: DedupeItem[]
+  duplicate_items: DedupeItem[]
+  skipped_all: boolean
+}
+
 export interface UploadResult {
   document_id: number
   title: string
@@ -182,6 +209,7 @@ export interface UploadResult {
   chapters: number
   status: string
   message: string
+  dedupe?: DedupeInfo | null
 }
 
 // ---------------- 校园服务：报修 / 预约 / 失物招领 ----------------
@@ -259,4 +287,10 @@ export interface UploadedImage {
   url: string
   size_bytes: number
   content_type: string
+}
+
+export interface OcrStatus {
+  available: boolean
+  engine: string
+  hint: string
 }

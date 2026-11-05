@@ -65,6 +65,17 @@ class DocumentDetail(DocumentItem):
     chunks: list[ChunkPreview] = Field(default_factory=list)
 
 
+class DedupeInfo(BaseModel):
+    """条款级去重报告：新增了哪些条例、跳过了哪些重复。"""
+
+    total: int = 0
+    added: int = 0
+    duplicates: int = 0
+    added_items: list[dict] = Field(default_factory=list)
+    duplicate_items: list[dict] = Field(default_factory=list)
+    skipped_all: bool = False
+
+
 class DocumentUploadResponse(BaseModel):
     """上传入库结果。"""
 
@@ -75,6 +86,7 @@ class DocumentUploadResponse(BaseModel):
     chapters: int
     status: str = "done"
     message: str = "入库成功"
+    dedupe: DedupeInfo | None = None
 
 
 class DeleteResponse(BaseModel):
