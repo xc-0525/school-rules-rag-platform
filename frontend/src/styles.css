@@ -192,8 +192,9 @@ body {
 
 .brand-en {
   margin-top: 5px;
-  font-size: 8.5px;
-  letter-spacing: 1.04px;
+  font-size: 8px;
+  letter-spacing: 0.28px;
+  white-space: nowrap;
   color: rgba(194, 161, 91, 0.78);
 }
 
@@ -349,7 +350,7 @@ body {
   font-family: var(--font-serif);
   font-size: 11.5px;
   letter-spacing: 3px;
-  color: rgba(194, 161, 91, 0.66);
+  color: rgba(194, 161, 91, 0.88);
 }
 
 .aside-logout {
@@ -444,6 +445,16 @@ body {
 .app-main {
   padding: 18px 20px 20px;
   overflow: hidden;
+}
+
+/* 路由切换淡入，避免页面生硬闪切 */
+.page-fade-enter-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.page-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
 }
 
 /* ---------------- 通用卡片 ---------------- */
@@ -616,7 +627,7 @@ body {
   font-family: var(--font-serif);
   font-size: 12.5px;
   letter-spacing: 5px;
-  color: rgba(194, 161, 91, 0.6);
+  color: rgba(194, 161, 91, 0.86);
 }
 
 .login-formside {
@@ -630,13 +641,13 @@ body {
 }
 
 .login-card {
-  width: 396px;
+  width: 420px;
   max-width: 100%;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  padding: 0;
+  padding: 38px 34px 30px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 1px 2px rgba(24, 26, 31, 0.04), 0 24px 60px rgba(24, 26, 31, 0.08);
 }
 
 .login-eyebrow {
@@ -852,6 +863,7 @@ body {
 /* ---------------- 消息 ---------------- */
 .message-row {
   display: flex;
+  align-items: flex-start;
   gap: 12px;
   margin-bottom: 22px;
 }
@@ -862,6 +874,7 @@ body {
 
 .message-avatar {
   flex-shrink: 0;
+  align-self: flex-start;
   font-size: 12px;
   border: 1px solid #e5ded1;
   background: #efe9df;
@@ -1435,7 +1448,9 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding-bottom: 14px;
   margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
 }
 
 .document-actions {
@@ -1466,6 +1481,27 @@ body {
 /* ---------------- 细节收敛 ---------------- */
 .el-button {
   font-weight: 500;
+}
+
+.el-tag {
+  border-radius: 6px;
+}
+
+.el-alert {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.el-alert--info.is-light {
+  background: #faf8f3;
+}
+
+.el-alert--success.is-light {
+  background: #f4f7f2;
+}
+
+.el-message-box {
+  border-radius: 16px;
 }
 
 .el-dialog {

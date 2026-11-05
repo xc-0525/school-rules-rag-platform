@@ -60,7 +60,7 @@
     <el-col :span="12" style="height: 100%">
       <div class="panel panel-pad scroll-panel">
         <div class="panel-title">系统说明</div>
-        <el-alert type="success" :closable="false" show-icon style="margin-bottom: 14px">
+        <el-alert type="info" :closable="false" show-icon style="margin-bottom: 14px">
           <template #title>课程答辩演示要点</template>
           <div class="upload-hint">
             1. Agent 图共 13 节点，含 <b>并行（双路召回）</b>、<b>选择（充分性判定/缓存）</b>、
@@ -72,7 +72,7 @@
         </el-alert>
 
         <div class="panel-title">启动顺序（本机）</div>
-        <pre class="muted" style="background: #f8fafc; padding: 12px; border-radius: 10px; line-height: 1.8">
+        <pre class="muted" style="background: var(--bg); padding: 12px; border-radius: 10px; line-height: 1.8; border: 1px solid var(--border)">
 1. scripts\start_neo4j.ps1        # 启动 Neo4j
 2. scripts\start_backend.ps1      # 启动后端（首次预热 BGE 约 2~3 分钟）
 3. cd frontend; npm run dev       # 启动前端开发服务器</pre>
