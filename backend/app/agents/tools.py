@@ -711,7 +711,12 @@ class ToolRunner:
             name="query_location_availability",
             arguments={"location": keyword, "date": res_date},
             success=True,
-            summary="场馆余量查询结果：\n\n" + "\n".join(lines),
+            summary=(
+                "场馆余量查询结果：\n\n"
+                + "\n".join(lines)
+                + "\n\n如需预约，请告诉我要约的位置、日期和时段（例如“约明天下午的研讨间”），"
+                "我可以生成预约草稿，由你确认后生效。"
+            ),
             sources=[
                 SourceItem(
                     type="tool",
