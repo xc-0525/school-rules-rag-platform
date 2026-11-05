@@ -496,49 +496,66 @@ body {
 }
 
 /* ---------------- 登录页 ---------------- */
+/* 背景用汤逊湖校园航拍：照片向右羽化淡出成暖白纸面，而不是被一层灰白渐变盖住 */
 .login-page {
+  position: relative;
   min-height: 100vh;
   display: grid;
   grid-template-columns: minmax(0, 1.06fr) minmax(420px, 0.94fr);
   background: var(--paper);
+  overflow: hidden;
+}
+
+.login-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url('./assets/campus-wut.jpg') center / cover no-repeat;
+  -webkit-mask-image: linear-gradient(
+    100deg,
+    #000 0%,
+    #000 38%,
+    rgba(0, 0, 0, 0.7) 50%,
+    rgba(0, 0, 0, 0.22) 62%,
+    transparent 72%
+  );
+  mask-image: linear-gradient(
+    100deg,
+    #000 0%,
+    #000 38%,
+    rgba(0, 0, 0, 0.7) 50%,
+    rgba(0, 0, 0, 0.22) 62%,
+    transparent 72%
+  );
+}
+
+.login-page::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(56% 52% at 4% 0%, rgba(138, 28, 28, 0.42), transparent 64%),
+    linear-gradient(180deg, rgba(9, 13, 19, 0.72) 0%, rgba(9, 13, 19, 0.26) 26%, rgba(9, 13, 19, 0) 52%),
+    linear-gradient(
+      100deg,
+      rgba(9, 13, 19, 0.92) 0%,
+      rgba(9, 13, 19, 0.86) 34%,
+      rgba(9, 13, 19, 0.6) 52%,
+      rgba(9, 13, 19, 0.16) 66%,
+      transparent 76%
+    );
 }
 
 .login-brandside {
   position: relative;
+  z-index: 1;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   justify-content: center;
   padding: 64px 6vw;
   color: #f3eee3;
-  background:
-    radial-gradient(90% 60% at 8% 0%, rgba(138, 28, 28, 0.55), transparent 58%),
-    radial-gradient(80% 60% at 100% 100%, rgba(31, 58, 95, 0.6), transparent 62%),
-    linear-gradient(160deg, #171d26 0%, #0f1319 100%);
-}
-
-.login-brandside::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px);
-  background-size: 34px 34px;
-  -webkit-mask-image: radial-gradient(85% 75% at 30% 38%, #000, transparent 78%);
-  mask-image: radial-gradient(85% 75% at 30% 38%, #000, transparent 78%);
-}
-
-.login-brandside::after {
-  content: '';
-  position: absolute;
-  right: -190px;
-  bottom: -240px;
-  width: 540px;
-  height: 540px;
-  border-radius: 50%;
-  border: 1px solid rgba(194, 161, 91, 0.16);
-  box-shadow: inset 0 0 0 1px rgba(194, 161, 91, 0.05);
 }
 
 .login-brandside > * {
@@ -592,7 +609,8 @@ body {
   max-width: 430px;
   font-size: 13px;
   line-height: 1.95;
-  color: rgba(232, 235, 240, 0.62);
+  color: rgba(238, 241, 246, 0.78);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.4);
 }
 
 .login-points {
@@ -608,7 +626,8 @@ body {
   gap: 8px;
   font-size: 12px;
   letter-spacing: 0.4px;
-  color: rgba(232, 235, 240, 0.72);
+  color: rgba(238, 241, 246, 0.8);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
 }
 
 .login-point::before {
@@ -631,13 +650,13 @@ body {
 }
 
 .login-formside {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 40px 32px;
-  background:
-    radial-gradient(120% 70% at 100% 0%, rgba(138, 28, 28, 0.045), transparent 62%),
-    var(--paper);
+  background: transparent;
 }
 
 .login-card {
@@ -645,9 +664,12 @@ body {
   max-width: 100%;
   padding: 38px 34px 30px;
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   border-radius: 20px;
-  box-shadow: 0 1px 2px rgba(24, 26, 31, 0.04), 0 24px 60px rgba(24, 26, 31, 0.08);
+  box-shadow:
+    0 1px 2px rgba(20, 24, 31, 0.05),
+    0 18px 44px rgba(20, 24, 31, 0.1),
+    0 42px 90px rgba(20, 24, 31, 0.08);
 }
 
 .login-eyebrow {
@@ -1539,6 +1561,11 @@ body {
 @media (max-width: 1080px) {
   .login-page {
     grid-template-columns: 1fr;
+    background: var(--paper);
+  }
+
+  .login-page::before {
+    display: none;
   }
 
   .login-brandside {
@@ -1547,6 +1574,10 @@ body {
 
   .login-formside {
     padding: 32px 20px;
+  }
+
+  .login-card {
+    box-shadow: 0 12px 36px rgba(20, 24, 31, 0.07);
   }
 }
 

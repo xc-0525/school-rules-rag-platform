@@ -7,8 +7,8 @@
       <div class="login-rule"></div>
       <div class="login-sysname">校园服务智能问答系统</div>
       <p class="login-syssub">
-        以校纪校规、办事指南与校园通知为知识底座，向量检索与知识图谱并行召回，
-        多智能体协作给出带条款来源的回答，并直接办理报修、预约与失物招领。
+        以校纪校规、办事指南与校园通知为知识底座，双路召回并给出带条款来源的回答，
+        同时支持报修、预约与失物招领办理。
       </p>
       <div class="login-points">
         <span class="login-point">双路召回 · 证据融合</span>
