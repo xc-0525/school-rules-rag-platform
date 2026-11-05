@@ -130,18 +130,24 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   createNotice,
   deleteNotice,
+  fetchBannerNotices,
   fetchNoticeCategories,
   fetchNotices,
   updateNotice,
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { clearDismissedNotices, loadDismissedNotices } from '../utils/noticeBanner'
+import {
+  clearDismissedNotices,
+  loadDismissedNotices,
+  noticeDismissKey,
+  subscribeDismissedNotices,
+} from '../utils/noticeBanner'
 import type { NoticeCategoryOption, NoticeItem } from '../types'
 
 const route = useRoute()
@@ -159,6 +165,9 @@ const editing = ref<NoticeItem | null>(null)
 const focusId = ref<number | null>(null)
 /** 被学生点 × 隐藏的紧急提示条数 */
 const hiddenCount = ref(0)
+/** 顶部横幅当前挂载的紧急公告，用来把"隐藏条数"算准（公告下架后不再计数） */
+const bannerItems = ref<NoticeItem[]>([])
+const bannerLoaded = ref(false)
 
 const emptyForm = () => ({
   title: '',
@@ -195,12 +204,34 @@ async function scrollToFocus() {
   target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
+function countDismissed(): number {
+  const keys = loadDismissedNotices()
+  if (!bannerLoaded.value) return keys.length
+  // 与横幅口径对齐：只统计当前仍在横幅里的公告，避免下架后残留记录让计数虚高
+  return bannerItems.value.filter((item) => keys.includes(noticeDismissKey(item))).length
+}
+
+function refreshHiddenCount() {
+  hiddenCount.value = countDismissed()
+}
+
+async function loadBanner() {
+  try {
+    bannerItems.value = await fetchBannerNotices()
+    bannerLoaded.value = true
+  } catch {
+    // 横幅接口失败时退化成按记录条数展示，至少保证"恢复显示"入口可点
+    bannerLoaded.value = false
+  } finally {
+    refreshHiddenCount()
+  }
+}
+
 function restoreDismissed() {
-  const cleared = clearDismissedNotices()
   // 清空后“已隐藏”计数必须归零，否则按钮会一直留在页面上（且第二次点击无意义）
   hiddenCount.value = 0
-  // 通知顶部横幅组件重新读取关闭记录
-  window.dispatchEvent(new CustomEvent('notice-banner:restore'))
+  const cleared = clearDismissedNotices()
+  // 横幅组件订阅了关闭记录变化，会自行重新读取并恢复显示
   ElMessage.success(cleared ? `已恢复显示 ${cleared} 条紧急提示` : '已恢复显示紧急提示')
 }
 
@@ -279,11 +310,20 @@ async function remove(item: NoticeItem) {
   }
 }
 
+let unsubscribe: (() => void) | null = null
+
 onMounted(() => {
   const focus = Number(route.query.focus)
   if (Number.isInteger(focus) && focus > 0) focusId.value = focus
-  hiddenCount.value = loadDismissedNotices().length
+  // 先按本地记录出一次入口，等横幅数据回来再校正为准确条数
+  refreshHiddenCount()
+  unsubscribe = subscribeDismissedNotices(refreshHiddenCount)
+  loadBanner()
   loadCategories()
   load()
+})
+
+onBeforeUnmount(() => {
+  unsubscribe?.()
 })
 </script>

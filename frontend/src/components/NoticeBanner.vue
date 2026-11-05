@@ -35,7 +35,7 @@ import { useRouter } from 'vue-router'
 import { BellFilled } from '@element-plus/icons-vue'
 import { fetchBannerNotices } from '../api/client'
 import type { NoticeItem } from '../types'
-import { dismissNotice, loadDismissedNotices, noticeDismissKey } from '../utils/noticeBanner'
+import { dismissNotice, loadDismissedNotices, noticeDismissKey, subscribeDismissedNotices } from '../utils/noticeBanner'
 
 const router = useRouter()
 const items = ref<NoticeItem[]>([])
@@ -60,9 +60,7 @@ function step(delta: number) {
 
 function dismissCurrent() {
   if (!current.value) return
-  dismissed.value = dismissNotice(noticeDismissKey(current.value))
-  // 关闭后自动落到同位置的下一条；越界时从头开始
-  index.value = Math.min(index.value, Math.max(visible.value.length - 1, 0))
+  dismissNotice(noticeDismissKey(current.value))
 }
 
 function goNotices() {
@@ -70,15 +68,20 @@ function goNotices() {
   router.push({ path: '/notices', query: { focus: String(current.value.id) } })
 }
 
-/** 公告板块的"恢复显示"会广播事件，这里重新读取关闭记录 */
-function onRestore() {
-  dismissed.value = []
-  index.value = 0
+/** 关闭记录可能来自本页 ×、公告页"恢复显示"或另一个标签页，统一按最新记录重算 */
+function applyDismissed(list: string[]) {
+  const restored = list.length < dismissed.value.length
+  dismissed.value = list
+  const remain = items.value.filter((item) => !list.includes(noticeDismissKey(item))).length
+  // 关闭后落到同位置的下一条；恢复后从头轮播
+  index.value = restored ? 0 : Math.min(index.value, Math.max(remain - 1, 0))
 }
+
+let unsubscribe: (() => void) | null = null
 
 onMounted(async () => {
   dismissed.value = loadDismissedNotices()
-  window.addEventListener('notice-banner:restore', onRestore)
+  unsubscribe = subscribeDismissedNotices(applyDismissed)
   try {
     items.value = await fetchBannerNotices()
   } catch {
@@ -87,6 +90,6 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('notice-banner:restore', onRestore)
+  unsubscribe?.()
 })
 </script>

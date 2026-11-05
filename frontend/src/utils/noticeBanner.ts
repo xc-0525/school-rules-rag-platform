@@ -9,6 +9,9 @@ import type { NoticeItem } from '../types'
 const STORAGE_KEY = 'notice-banner-dismissed-v1'
 const MAX_RECORDS = 50
 
+/** 关闭记录变化时广播，横幅与公告页的"已隐藏 N 条"据此保持同步 */
+export const NOTICE_DISMISSED_EVENT = 'notice-banner:dismissed'
+
 export function noticeDismissKey(item: Pick<NoticeItem, 'id' | 'updated_at' | 'effective_at'>): string {
   return `${item.id}:${item.updated_at || item.effective_at || ''}`
 }
@@ -23,6 +26,27 @@ export function loadDismissedNotices(): string[] {
   }
 }
 
+function notifyChanged(list: string[]) {
+  window.dispatchEvent(new CustomEvent<string[]>(NOTICE_DISMISSED_EVENT, { detail: list }))
+}
+
+/** 订阅关闭记录变化：同页面靠自定义事件，跨标签页靠 storage 事件 */
+export function subscribeDismissedNotices(handler: (list: string[]) => void): () => void {
+  const onCustom = (event: Event) => {
+    const detail = (event as CustomEvent<string[]>).detail
+    handler(Array.isArray(detail) ? detail : loadDismissedNotices())
+  }
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === STORAGE_KEY || event.key === null) handler(loadDismissedNotices())
+  }
+  window.addEventListener(NOTICE_DISMISSED_EVENT, onCustom)
+  window.addEventListener('storage', onStorage)
+  return () => {
+    window.removeEventListener(NOTICE_DISMISSED_EVENT, onCustom)
+    window.removeEventListener('storage', onStorage)
+  }
+}
+
 /** 关闭一条公告，返回最新记录（超出上限丢弃最旧的） */
 export function dismissNotice(key: string): string[] {
   const next = [...loadDismissedNotices().filter((k) => k !== key), key].slice(-MAX_RECORDS)
@@ -31,6 +55,7 @@ export function dismissNotice(key: string): string[] {
   } catch {
     /* 隐私模式等场景写不进去就只当本次会话生效 */
   }
+  notifyChanged(next)
   return next
 }
 
@@ -42,5 +67,6 @@ export function clearDismissedNotices(): number {
   } catch {
     /* ignore */
   }
+  notifyChanged([])
   return count
 }
