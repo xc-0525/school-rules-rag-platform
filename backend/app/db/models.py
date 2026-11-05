@@ -230,6 +230,8 @@ class LocationReservation(Base):
     slot: Mapped[str] = mapped_column(String(20))      # morning / afternoon / evening
     # reserved → fulfilled / cancelled / no_show
     status: Mapped[str] = mapped_column(String(20), default="reserved")
+    # 取消原因：管理员代取消时填写，学生在“我的预约”可见
+    cancel_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

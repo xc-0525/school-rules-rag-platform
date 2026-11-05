@@ -94,6 +94,18 @@ def main() -> int:
             )
             if cursor.rowcount:
                 print(f"  研讨间容量改为 1（{cursor.rowcount} 条）")
+            # 007：取消原因列
+            cursor.execute(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='location_reservations' AND COLUMN_NAME=%s",
+                (url.database, "cancel_reason"),
+            )
+            if not cursor.fetchone()[0]:
+                cursor.execute(
+                    "ALTER TABLE location_reservations ADD COLUMN cancel_reason "
+                    "VARCHAR(200) NULL DEFAULT NULL COMMENT '取消原因（管理员填写，学生可见）'"
+                )
+                print("  新增列 cancel_reason")
         connection.commit()
 
         ok = True

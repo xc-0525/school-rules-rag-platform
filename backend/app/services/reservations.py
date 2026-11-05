@@ -118,6 +118,14 @@ def _decorate_reservation(row: dict[str, Any], location: dict[str, Any] | None) 
         item["location_zone"] = location.get("zone", "")
     item["created_at"] = _fmt_dt(item.get("created_at"))
     item["updated_at"] = _fmt_dt(item.get("updated_at"))
+    # 过期未履约：日期已过且仍是 reserved，前端据此显示“已过期”并可折叠
+    res_date = str(item.get("res_date") or "")
+    item["is_expired"] = (
+        bool(res_date) and res_date < date.today().isoformat()
+        and item.get("status") in ACTIVE_RESERVATION_STATUSES
+    )
+    item.setdefault("username", "")
+    item.setdefault("cancel_reason", None)
     return item
 
 
@@ -432,12 +440,14 @@ def _list_reservations(
             for r in rows[:limit]
         ]
 
-    from app.db.models import LocationReservation, ReservableLocation
+    from app.db.models import LocationReservation, ReservableLocation, User
     from app.db.session import new_session
 
     with new_session(settings.mysql_url) as session:
-        query = session.query(LocationReservation, ReservableLocation).outerjoin(
-            ReservableLocation, ReservableLocation.id == LocationReservation.location_id
+        query = (
+            session.query(LocationReservation, ReservableLocation, User.username)
+            .outerjoin(ReservableLocation, ReservableLocation.id == LocationReservation.location_id)
+            .outerjoin(User, User.id == LocationReservation.user_id)
         )
         if not (all_users or is_admin):
             query = query.filter(LocationReservation.user_id == user_id)
@@ -454,9 +464,11 @@ def _list_reservations(
                     "id": r.id,
                     "location_id": r.location_id,
                     "user_id": r.user_id,
+                    "username": username or "",
                     "res_date": r.res_date,
                     "slot": r.slot,
                     "status": r.status,
+                    "cancel_reason": r.cancel_reason,
                     "created_at": r.created_at,
                     "updated_at": r.updated_at,
                 },
@@ -465,7 +477,7 @@ def _list_reservations(
                     "zone": loc.zone if loc else "",
                 },
             )
-            for r, loc in rows
+            for r, loc, username in rows
         ]
 
 
@@ -489,8 +501,12 @@ def transition_reservation(
     *,
     is_admin: bool,
     action: str,
+    remark: str = "",
 ) -> dict[str, Any]:
-    """reserved → cancelled（本人或管理员）/ fulfilled、no_show（管理员）。"""
+    """reserved → cancelled（本人或管理员）/ fulfilled、no_show（管理员）。
+
+    cancel 时 remark 写入 cancel_reason，学生在“我的预约”能看到取消原因。
+    """
     allowed = {
         "cancel": {"to": "cancelled", "admin_only": False},
         "fulfill": {"to": "fulfilled", "admin_only": True},
@@ -511,6 +527,8 @@ def transition_reservation(
                 raise ReservationRuleError(f"当前状态为 {row['status']}，不能再变更")
             row["status"] = spec["to"]
             row["updated_at"] = datetime.now()
+            if action == "cancel":
+                row["cancel_reason"] = (remark or "").strip()[:200] or None
             return _decorate_reservation(dict(row), _mock_location_by_id(row["location_id"]))
 
     from app.db.models import LocationReservation
@@ -524,5 +542,7 @@ def transition_reservation(
             raise ReservationRuleError(f"当前状态为 {r.status}，不能再变更")
         r.status = spec["to"]
         r.updated_at = datetime.now()
+        if action == "cancel":
+            r.cancel_reason = (remark or "").strip()[:200] or None
         session.commit()
         return get_reservation(settings, reservation_id, actor_id, is_admin=True)  # type: ignore[return-value]

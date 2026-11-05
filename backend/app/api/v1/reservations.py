@@ -15,6 +15,7 @@ from app.schemas.campus import (
     LocationItem,
     ReservationCreate,
     ReservationItem,
+    ReservationTransition,
 )
 from app.services import reservations as reservation_service
 from app.services.auth import AuthUser, build_current_user_dependency
@@ -91,7 +92,10 @@ def build_router(settings: Settings) -> APIRouter:
         summary="预约流转（cancel=本人/管理员，fulfill、no_show=管理员）",
     )
     async def transition_api(
-        reservation_id: int, action: str, user: AuthUser = Depends(current_user)
+        reservation_id: int,
+        action: str,
+        payload: ReservationTransition | None = None,
+        user: AuthUser = Depends(current_user),
     ):
         try:
             item = await asyncio.to_thread(
@@ -101,6 +105,7 @@ def build_router(settings: Settings) -> APIRouter:
                 user.id,
                 is_admin=user.is_admin,
                 action=action,
+                remark=(payload.remark if payload else ""),
             )
         except reservation_service.ReservationRuleError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

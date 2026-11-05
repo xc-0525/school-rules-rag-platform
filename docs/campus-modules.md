@@ -120,6 +120,10 @@
 `GET /reservations/availability` 返回每个时段的 `capacity / booked_count / remaining`，
 `booked` 字段保留为“是否已满”的布尔兼容值。
 
+**过期与取消**：`is_expired` 标记“日期已过但仍为 reserved”的记录，前端默认折叠、可展开；
+管理员可代取消任意用户的预约，取消时必须填写原因（写入 `cancel_reason`），
+学生在“我的预约”直接看到该原因——作为一次定向通知，不额外引入站内信表。
+
 **冲突处理**：统一捕获后映射为 **HTTP 409**（detail 含 `message` 与 `conflict_reservation_id`），
 前端提示"手慢了，该时段刚被别人预约成功"，并自动刷新时段占用表；绝不把 500 暴露给用户。
 

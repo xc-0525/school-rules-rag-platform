@@ -69,12 +69,23 @@ class ReservationItem(BaseModel):
     location_name: str = ""
     location_zone: str = ""
     user_id: int
+    username: str = ""
     res_date: str
     slot: str
     slot_label: str = ""
     status: str = "reserved"
+    # 过期未履约（日期已过且仍为 reserved），前端据此折叠与标记
+    is_expired: bool = False
+    # 管理员取消时填写的原因，学生在“我的预约”可见
+    cancel_reason: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class ReservationTransition(BaseModel):
+    """流转请求体（仅 cancel 用 remark 记录取消原因）。"""
+
+    remark: str = ""
 
 
 class AvailabilityResponse(BaseModel):

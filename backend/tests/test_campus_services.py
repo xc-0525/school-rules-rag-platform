@@ -227,6 +227,48 @@ class ReservationServiceTests(unittest.TestCase):
             )
         self.assertIn("已经预约过", str(ctx.exception))
 
+    def test_cancel_reason_visible_to_owner(self) -> None:
+        """管理员代取消要留原因，学生列表能看到（相当于单人通知）。"""
+        created = res_service.create_reservation(
+            self.settings, 1, location_id=1, res_date=TOMORROW, slot="evening"
+        )
+        out = res_service.transition_reservation(
+            self.settings,
+            created["id"],
+            99,
+            is_admin=True,
+            action="cancel",
+            remark="场地临时维护关闭",
+        )
+        self.assertEqual(out["status"], "cancelled")
+        self.assertEqual(out["cancel_reason"], "场地临时维护关闭")
+
+    def test_expired_flag_on_past_reservation(self) -> None:
+        """日期已过但仍为 reserved 的记录标记 is_expired，前端据此折叠。"""
+        res_service.seed_mock_locations()
+        past = (date.today() - timedelta(days=2)).isoformat()
+        with res_service._mock_lock:
+            res_service._mock_reservations.append(
+                {
+                    "id": 9100,
+                    "location_id": 1,
+                    "user_id": 1,
+                    "res_date": past,
+                    "slot": "morning",
+                    "status": "reserved",
+                    "created_at": datetime.now(),
+                    "updated_at": None,
+                }
+            )
+        rows = res_service.list_reservations(self.settings, user_id=1, is_admin=False)
+        row = next(r for r in rows if r["id"] == 9100)
+        self.assertTrue(row["is_expired"])
+        # 未来预约不应被标记
+        fresh = res_service.create_reservation(
+            self.settings, 1, location_id=1, res_date=TOMORROW, slot="afternoon"
+        )
+        self.assertFalse(fresh["is_expired"])
+
     def test_expired_reservation_not_in_quota(self) -> None:
         """过期未履约的记录不占配额：否则用户把未来预约全取消后仍被判“已满”。"""
         res_service.seed_mock_locations()

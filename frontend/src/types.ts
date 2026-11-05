@@ -292,9 +292,15 @@ export interface ReservationItem {
   location_name: string
   location_zone: string
   user_id: number
+  /** 管理员视角显示预约人 */
+  username?: string
   res_date: string
   slot: string
   slot_label: string
+  /** 日期已过但仍为 reserved */
+  is_expired?: boolean
+  /** 管理员取消时填写的原因 */
+  cancel_reason?: string | null
   status: 'reserved' | 'cancelled' | 'fulfilled' | 'no_show'
   created_at: string | null
   updated_at: string | null

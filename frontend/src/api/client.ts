@@ -296,8 +296,13 @@ export function createReservation(payload: {
 export function transitionReservation(
   id: number,
   action: 'cancel' | 'fulfill' | 'no_show',
+  remark = '',
 ): Promise<ReservationItem> {
-  return request<ReservationItem>(`/api/v1/reservations/${id}/${action}`, { method: 'POST' })
+  return request<ReservationItem>(`/api/v1/reservations/${id}/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ remark }),
+  })
 }
 
 export function fetchLostFound(scope = 'public', kind = ''): Promise<LostFoundItem[]> {

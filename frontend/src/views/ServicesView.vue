@@ -92,20 +92,45 @@
           </div>
         </div>
 
-        <div class="panel-subtitle">我的预约</div>
-        <el-table :data="reservations" size="small" stripe>
-          <el-table-column prop="location_name" label="位置" min-width="140" />
+        <div class="panel-subtitle">
+          {{ auth.isAdmin ? '全部预约（管理员）' : '我的预约' }}
+          <span v-if="expiredCount" class="history-toggle">
+            <el-switch v-model="showExpired" size="small" />
+            <span>{{ showExpired ? '收起已过期' : `显示已过期（${expiredCount}）` }}</span>
+          </span>
+        </div>
+        <el-table :data="visibleReservations" size="small" stripe>
+          <el-table-column v-if="auth.isAdmin" prop="username" label="预约人" width="110">
+            <template #default="{ row }">{{ row.username || `#${row.user_id}` }}</template>
+          </el-table-column>
+          <el-table-column prop="location_name" label="位置" min-width="150" />
           <el-table-column prop="res_date" label="日期" width="110" />
-          <el-table-column prop="slot_label" label="时段" min-width="140" />
-          <el-table-column label="状态" width="100">
+          <el-table-column label="时段" width="170">
             <template #default="{ row }">
-              <el-tag size="small" :type="resStatusType(row.status)">{{ resStatusLabel(row.status) }}</el-tag>
+              <span class="slot-cell">
+                <el-tag size="small" effect="plain" :type="slotTagType(row.slot)">{{ slotShort(row.slot) }}</el-tag>
+                <span class="muted">{{ slotTime(row.slot) }}</span>
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" min-width="150">
+            <template #default="{ row }">
+              <el-tag size="small" :type="resStatusType(row)">{{ resStatusLabel(row) }}</el-tag>
+              <span v-if="row.cancel_reason" class="muted" style="margin-left: 6px; font-size: 12px">
+                {{ row.cancel_reason }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="110">
             <template #default="{ row }">
-              <el-button v-if="row.status === 'reserved'" link type="danger" size="small" @click="cancelReservation(row)">
-                取消
+              <el-button
+                v-if="row.status === 'reserved' && !row.is_expired"
+                link
+                type="danger"
+                size="small"
+                @click="cancelReservation(row)"
+              >
+                {{ auth.isAdmin ? '代取消' : '取消' }}
               </el-button>
             </template>
           </el-table-column>
@@ -224,6 +249,37 @@
         <el-button type="danger" :loading="closeLoading" @click="confirmCloseRepair">确认关闭</el-button>
       </template>
     </el-dialog>
+    <!-- 管理员代取消预约（必须填原因，学生端可见） -->
+    <el-dialog v-model="cancelDialog" title="代学生取消预约" width="500px" :close-on-click-modal="false">
+      <el-form label-width="72px">
+        <el-form-item label="预约人">
+          <span>{{ cancelTarget?.username || '#' + (cancelTarget?.user_id ?? '') }}</span>
+        </el-form-item>
+        <el-form-item label="预约">
+          <span>{{ cancelTarget?.location_name }} · {{ cancelTarget?.res_date }} {{ cancelTarget?.slot_label }}</span>
+        </el-form-item>
+        <el-form-item label="原因" required>
+          <el-select
+            v-model="cancelReason"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择常见原因，或直接输入"
+            style="width: 100%"
+          >
+            <el-option v-for="reason in CANCEL_PRESETS" :key="reason" :label="reason" :value="reason" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div class="muted" style="font-size: 12px">
+        取消后该时段立即释放，学生能在“我的预约”看到这条原因
+      </div>
+      <template #footer>
+        <el-button @click="cancelDialog = false">返回</el-button>
+        <el-button type="danger" :loading="cancelLoading" @click="confirmCancelForUser">确认取消</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 失物招领发布弹窗 -->
     <el-dialog v-model="lfDialog" :title="lfForm.kind === 'lost' ? '发布失物（我丢了东西）' : '发布招领（我捡到东西）'" width="560px" :close-on-click-modal="false">
       <el-form :model="lfForm" label-width="90px">
@@ -255,7 +311,12 @@
             <el-button size="small">添加图片（jpg/png/webp，≤5MB，最多 3 张）</el-button>
           </el-upload>
           <div v-if="lfForm.image_urls.length" class="lf-images" style="margin-top: 8px">
-            <SecureImage v-for="u in lfForm.image_urls" :key="u" :url="u" :size="72" />
+            <div v-for="(u, i) in lfForm.image_urls" :key="u" class="lf-thumb-wrap">
+              <SecureImage :url="u" :size="72" />
+              <button type="button" class="lf-thumb-remove" title="移除这张图片" @click="removeLfImage(i)">
+                ×
+              </button>
+            </div>
           </div>
         </el-form-item>
       </el-form>
@@ -410,7 +471,25 @@ const locations = ref<LocationItem[]>([])
 const selectedLocation = ref<LocationItem | null>(null)
 const reserveDate = ref('')
 const availability = ref<AvailabilityInfo>({ location_id: 0, date: '', slots: [], range_note: '' })
+/** 管理员代取消预约：原因必填，学生端可见 */
+const cancelDialog = ref(false)
+const cancelTarget = ref<ReservationItem | null>(null)
+const cancelReason = ref('')
+const cancelLoading = ref(false)
+const CANCEL_PRESETS = [
+  '时段调整，请重新预约',
+  '场地临时维护关闭',
+  '重复预约，保留其中一条',
+  '长时间未到馆，座位已释放',
+]
+
 const reservations = ref<ReservationItem[]>([])
+/** 默认收起过期记录，避免列表越滚越长；有过期时才显示开关 */
+const showExpired = ref(false)
+const expiredCount = computed(() => reservations.value.filter((r) => r.is_expired).length)
+const visibleReservations = computed(() =>
+  showExpired.value ? reservations.value : reservations.value.filter((r) => !r.is_expired),
+)
 
 const tomorrow = new Date(Date.now() + 86400_000).toISOString().slice(0, 10)
 const tomorrowTs = (() => {
@@ -425,14 +504,30 @@ function isDateDisabled(d: Date) {
   return d.getTime() < tomorrowTs || d.getTime() > maxTs
 }
 
-const RES_STATUS: Record<string, { label: string; type: 'primary' | 'success' | 'info' | 'danger' }> = {
+const RES_STATUS: Record<string, { label: string; type: 'primary' | 'success' | 'info' | 'danger' | 'warning' }> = {
   reserved: { label: '已预约', type: 'primary' },
   fulfilled: { label: '已使用', type: 'success' },
   cancelled: { label: '已取消', type: 'info' },
   no_show: { label: '违约', type: 'danger' },
 }
-const resStatusLabel = (s: string) => RES_STATUS[s]?.label ?? s
-const resStatusType = (s: string) => RES_STATUS[s]?.type ?? 'info'
+
+/** 过期未履约优先于 reserved 展示（日期已过但状态没流转） */
+const resStatusLabel = (row: ReservationItem) =>
+  row.is_expired ? '已过期' : (RES_STATUS[row.status]?.label ?? row.status)
+const resStatusType = (row: ReservationItem) =>
+  row.is_expired ? 'warning' : (RES_STATUS[row.status]?.type ?? 'info')
+
+/** 时段短标签：一列内快速扫读，具体时间跟在后面 */
+const SLOT_SHORT: Record<string, string> = { morning: '上午', afternoon: '中午', evening: '晚上' }
+const SLOT_TIME: Record<string, string> = {
+  morning: '08:00-12:00',
+  afternoon: '12:00-17:00',
+  evening: '17:00-22:00',
+}
+const slotShort = (slot: string) => SLOT_SHORT[slot] ?? slot
+const slotTime = (slot: string) => SLOT_TIME[slot] ?? ''
+const slotTagType = (slot: string) =>
+  slot === 'morning' ? 'success' : slot === 'afternoon' ? 'warning' : 'info'
 
 async function loadLocations() {
   try {
@@ -497,6 +592,13 @@ async function loadReservations() {
 }
 
 async function cancelReservation(row: ReservationItem) {
+  // 管理员代取消：必须填原因，学生会在“我的预约”看到这句话（相当于单人通知）
+  if (auth.isAdmin) {
+    cancelTarget.value = row
+    cancelReason.value = ''
+    cancelDialog.value = true
+    return
+  }
   try {
     await ElMessageBox.confirm(`取消 ${row.res_date} ${row.slot_label} 的预约？`, '取消预约', { type: 'warning' })
   } catch {
@@ -508,6 +610,28 @@ async function cancelReservation(row: ReservationItem) {
     await loadReservations()
   } catch (error: any) {
     ElMessage.error(`${error?.message || error}`)
+  }
+}
+
+/** 管理员代取消：提交原因 */
+async function confirmCancelForUser() {
+  const target = cancelTarget.value
+  const reason = cancelReason.value.trim()
+  if (!target) return
+  if (!reason) {
+    ElMessage.warning('请填写取消原因，学生会在“我的预约”看到')
+    return
+  }
+  cancelLoading.value = true
+  try {
+    await transitionReservation(target.id, 'cancel', reason)
+    ElMessage.success(`已取消 ${target.username || '#' + target.user_id} 的预约`)
+    cancelDialog.value = false
+    await Promise.all([loadReservations(), loadAvailability()])
+  } catch (error: any) {
+    ElMessage.error(`${error?.message || error}`)
+  } finally {
+    cancelLoading.value = false
   }
 }
 
@@ -574,6 +698,11 @@ async function onImagePicked(file: UploadFile) {
   } catch (error: any) {
     ElMessage.error(`上传失败：${error?.message || error}`)
   }
+}
+
+/** 单独移除某张已上传图片（只从表单移除，不影响已提交的条目） */
+function removeLfImage(index: number) {
+  lfForm.value.image_urls.splice(index, 1)
 }
 
 async function submitLf() {
@@ -735,8 +864,55 @@ onMounted(() => {
 
 .lf-images {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 10px;
+  margin-top: 10px;
+  /* 独占一行，避免和“添加图片”按钮挤在一起 */
+  flex-basis: 100%;
+  padding-left: 4px;
+}
+
+.history-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--muted, #909399);
+}
+
+/* 时段单元格：标签与时间不换行 */
+.slot-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* 缩略图右上角单独删除按钮 */
+.lf-thumb-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.lf-thumb-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  line-height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.lf-thumb-remove:hover {
+  background: var(--el-color-danger);
 }
 
 .lf-thumb {
