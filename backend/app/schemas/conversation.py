@@ -17,6 +17,20 @@ class ConversationItem(BaseModel):
     message_count: int = 0
 
 
+class ConversationPage(BaseModel):
+    """会话列表分页结果。
+
+    total 用独立 COUNT 查询得到，不用「本页条数 == limit」推断是否还有下一页，
+    否则总数恰好是 limit 整数倍时会多请求一次空页。
+    """
+
+    items: list[ConversationItem] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 10
+    offset: int = 0
+    has_more: bool = False
+
+
 class MessageItem(BaseModel):
     """会话中的一条消息。"""
 

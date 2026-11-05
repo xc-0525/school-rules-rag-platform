@@ -727,7 +727,7 @@ class LLMFailurePersistenceTests(unittest.TestCase):
         self.assertTrue(body["degraded"])
         self.assertIsNotNone(body["conversation_id"])
 
-        history = client.get("/api/v1/conversations").json()
+        history = client.get("/api/v1/conversations").json()["items"]
         self.assertEqual(len(history), 1, "会话历史里应能看到这条记录")
 
     def test_two_users_keep_their_own_records(self) -> None:
@@ -740,8 +740,8 @@ class LLMFailurePersistenceTests(unittest.TestCase):
         client.post("/api/v1/chat", json={"query": "宿舍晚上几点熄灯？"}, headers=headers_a)
         client.post("/api/v1/chat", json={"query": "图书馆几点开门？"}, headers=headers_b)
 
-        list_a = client.get("/api/v1/conversations", headers=headers_a).json()
-        list_b = client.get("/api/v1/conversations", headers=headers_b).json()
+        list_a = client.get("/api/v1/conversations", headers=headers_a).json()["items"]
+        list_b = client.get("/api/v1/conversations", headers=headers_b).json()["items"]
         self.assertEqual(len(list_a), 1)
         self.assertEqual(len(list_b), 1)
         self.assertNotEqual(list_a[0]["id"], list_b[0]["id"])

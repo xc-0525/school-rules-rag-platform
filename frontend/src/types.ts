@@ -166,6 +166,15 @@ export interface ConversationItem {
   message_count: number
 }
 
+/** 会话列表分页结果：total 由后端 COUNT 给出，has_more 不靠“本页是否满页”推断 */
+export interface ConversationPage {
+  items: ConversationItem[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
 export interface MessageItem {
   id: number
   conversation_id: number

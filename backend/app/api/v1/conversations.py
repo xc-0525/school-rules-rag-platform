@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.core.config import Settings
 from app.schemas.conversation import (
     ConversationDetail,
-    ConversationItem,
+    ConversationPage,
     FeedbackRequest,
     FeedbackResponse,
 )
@@ -27,14 +27,28 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
 
     @router.get(
         "/conversations",
-        response_model=list[ConversationItem],
-        summary="会话列表（按更新时间倒序，仅当前用户）",
+        response_model=ConversationPage,
+        summary="会话列表（更新时间倒序，支持标题搜索与分页，仅当前用户）",
     )
     async def list_conversations(
-        limit: int = 20, user: AuthUser = Depends(current_user)
+        limit: int = 10,
+        offset: int = 0,
+        keyword: str = "",
+        user: AuthUser = Depends(current_user),
     ):
-        limit = max(1, min(limit, 100))
-        return await persistence.list_conversations(user_id_of(user), limit)
+        limit = max(1, min(limit, 50))
+        offset = max(0, offset)
+        keyword = (keyword or "").strip()[:50]
+        items, total = await persistence.list_conversations(
+            user_id_of(user), limit=limit, offset=offset, keyword=keyword
+        )
+        return ConversationPage(
+            items=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            has_more=offset + len(items) < total,
+        )
 
     @router.get(
         "/conversations/{conversation_id}",

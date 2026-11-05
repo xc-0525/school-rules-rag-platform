@@ -1473,6 +1473,62 @@ body {
   transition: all 0.15s;
 }
 
+/* 历史页左栏：搜索固定、列表滚动、底部加载更多 */
+.history-side {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.history-side-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.history-count {
+  font-size: 12px;
+}
+
+.history-search {
+  margin-bottom: 12px;
+}
+
+.history-tip {
+  padding: 12px 4px;
+}
+
+.history-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.history-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 10px;
+}
+
+.history-end {
+  font-size: 12px;
+}
+
 .conversation-item:hover {
   background: #faf7f2;
   border-color: #ebe5db;

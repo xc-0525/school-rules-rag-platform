@@ -99,7 +99,7 @@ class MySQLPersistenceTests(unittest.TestCase):
         # 2) 会话列表能看到
         response = self.client.get("/api/v1/conversations")
         self.assertEqual(response.status_code, 200, response.text)
-        conversations = response.json()
+        conversations = response.json()["items"]
         target = next((item for item in conversations if item["id"] == conversation_id), None)
         self.assertIsNotNone(target)
         self.assertEqual(target["message_count"], 2)

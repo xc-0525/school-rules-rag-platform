@@ -27,7 +27,9 @@ def _iso(value: datetime | None) -> str | None:
 class Persistence(Protocol):
     async def save_qa(self, state: AgentState) -> dict[str, int | None]: ...
 
-    async def list_conversations(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]: ...
+    async def list_conversations(
+        self, user_id: int, limit: int = 20, offset: int = 0, keyword: str = ""
+    ) -> tuple[list[dict[str, Any]], int]: ...
 
     async def get_conversation(self, conversation_id: int, user_id: int) -> dict[str, Any] | None: ...
 
@@ -116,11 +118,19 @@ class MockPersistence:
         }
         return self._message_seq
 
-    async def list_conversations(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    async def list_conversations(
+        self, user_id: int, limit: int = 20, offset: int = 0, keyword: str = ""
+    ) -> tuple[list[dict[str, Any]], int]:
         with self._lock:
             rows = [row for row in self._conversations.values() if row["user_id"] == user_id]
-            rows.sort(key=lambda row: row["updated_at"] or "", reverse=True)
-            return [dict(row) for row in rows[:limit]]
+            term = (keyword or "").strip().lower()
+            if term:
+                rows = [row for row in rows if term in (row.get("title") or "").lower()]
+            # updated_at 同秒时用 id 兜底，保证翻页不重复、不漏项
+            rows.sort(key=lambda row: (row["updated_at"] or "", row["id"]), reverse=True)
+            total = len(rows)
+            window = rows[offset : offset + limit]
+            return [dict(row) for row in window], total
 
     async def get_conversation(self, conversation_id: int, user_id: int) -> dict[str, Any] | None:
         with self._lock:
@@ -249,25 +259,45 @@ class MySQLPersistence:
             }
 
     # ---- 会话列表 / 详情 ----
-    async def list_conversations(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
-        return await asyncio.to_thread(self._list_conversations_sync, user_id, limit)
+    async def list_conversations(
+        self, user_id: int, limit: int = 20, offset: int = 0, keyword: str = ""
+    ) -> tuple[list[dict[str, Any]], int]:
+        return await asyncio.to_thread(
+            self._list_conversations_sync, user_id, limit, offset, keyword
+        )
 
-    def _list_conversations_sync(self, user_id: int, limit: int) -> list[dict[str, Any]]:
-        from sqlalchemy import func, select
+    def _list_conversations_sync(
+        self, user_id: int, limit: int, offset: int, keyword: str
+    ) -> tuple[list[dict[str, Any]], int]:
+        from sqlalchemy import and_, func, select
 
         from app.db.models import Conversation, Message
         from app.db.session import new_session
 
+        conditions = [Conversation.user_id == user_id]
+        term = (keyword or "").strip()
+        if term:
+            # 标题取首问前 30 字，搜标题等价于搜"这轮问的是什么"，不 join 消息表
+            conditions.append(Conversation.title.like(f"%{term}%"))
+        where_clause = and_(*conditions)
+
         with new_session(self.url) as session:
+            total = int(
+                session.execute(
+                    select(func.count()).select_from(Conversation).where(where_clause)
+                ).scalar()
+                or 0
+            )
             rows = session.execute(
                 select(Conversation, func.count(Message.id).label("message_count"))
                 .outerjoin(Message, Message.conversation_id == Conversation.id)
-                .where(Conversation.user_id == user_id)
+                .where(where_clause)
                 .group_by(Conversation.id)
                 .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
                 .limit(limit)
+                .offset(offset)
             ).all()
-            return [
+            items = [
                 {
                     "id": conversation.id,
                     "user_id": conversation.user_id,
@@ -278,6 +308,7 @@ class MySQLPersistence:
                 }
                 for conversation, count in rows
             ]
+            return items, total
 
     async def get_conversation(self, conversation_id: int, user_id: int) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._get_conversation_sync, conversation_id, user_id)

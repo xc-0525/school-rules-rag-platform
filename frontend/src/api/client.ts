@@ -1,7 +1,7 @@
 import type {
   AvailabilityInfo,
   ConversationDetail,
-  ConversationItem,
+  ConversationPage,
   DocumentItem,
   HealthInfo,
   LocationItem,
@@ -99,8 +99,15 @@ export function logout(): Promise<{ logged_out: boolean }> {
 }
 
 // ---------------- 会话 ----------------
-export function fetchConversations(limit = 30): Promise<ConversationItem[]> {
-  return request<ConversationItem[]>(`/api/v1/conversations?limit=${limit}`)
+export function fetchConversations(
+  params: { limit?: number; offset?: number; keyword?: string } = {},
+): Promise<ConversationPage> {
+  const query = new URLSearchParams()
+  query.set('limit', String(params.limit ?? 10))
+  query.set('offset', String(params.offset ?? 0))
+  const keyword = (params.keyword ?? '').trim()
+  if (keyword) query.set('keyword', keyword)
+  return request<ConversationPage>(`/api/v1/conversations?${query.toString()}`)
 }
 
 export function fetchConversation(id: number): Promise<ConversationDetail> {
