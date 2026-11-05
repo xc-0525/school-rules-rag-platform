@@ -1,0 +1,18 @@
+import { chromium } from 'playwright'
+import { resolve } from 'node:path'
+const OUT = resolve('G:/毕业设计/校纪校规问答系统/school-rules-rag-platform/screenshots')
+const PDF = resolve('G:/毕业设计/校纪校规问答系统/school-rules-rag-platform/.buildtmp/report/校园电动车管理办法_演示.pdf')
+const browser = await chromium.launch()
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+await page.goto('http://127.0.0.1:8000/login', { waitUntil: 'networkidle' })
+await page.fill("input[type='text']", 'admin')
+await page.fill("input[type='password']", 'admin123')
+await page.keyboard.press('Enter')
+await page.waitForURL('**/chat', { timeout: 15000 })
+await page.goto('http://127.0.0.1:8000/documents', { waitUntil: 'networkidle' })
+await page.setInputFiles("input[type='file']", PDF)
+await page.waitForSelector('.el-message-box', { timeout: 120000 })
+await page.waitForTimeout(700)
+await page.screenshot({ path: `${OUT}/20-upload-dedupe-dialog.png` })
+console.log((await page.locator('.el-message-box').innerText()).replace(/\s+/g, ' ').slice(0, 160))
+await browser.close()

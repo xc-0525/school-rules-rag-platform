@@ -1,0 +1,14 @@
+{
+  "name": "校园服务工具选型评测集 v1",
+  "note": "用于 CAMPUS_TOOLS_ENABLED=1/0 的有无工具对比。expect_tool 是期望模型调用的工具名；t08 是 RAG 对照题，验证接入校园工具后没有抢走 search_rules。题面均以学生真实口吻书写，不含工具名。",
+  "items": [
+    {"id": "t01", "question": "我的报修到哪了", "expect_tool": "query_repair_status"},
+    {"id": "t02", "question": "我上周报的修处理得怎么样了", "expect_tool": "query_repair_status"},
+    {"id": "t03", "question": "明天图书馆还有位置吗", "expect_tool": "query_location_availability"},
+    {"id": "t04", "question": "明天下午研讨间还能约吗", "expect_tool": "query_location_availability"},
+    {"id": "t05", "question": "有人捡到校园卡吗", "expect_tool": "query_lost_found"},
+    {"id": "t06", "question": "最近有没有人捡到钥匙", "expect_tool": "query_lost_found"},
+    {"id": "t07", "question": "我预约了哪个时段", "expect_tool": "query_my_reservations"},
+    {"id": "t08", "question": "宿舍晚上几点熄灯", "expect_tool": "search_rules"}
+  ]
+}

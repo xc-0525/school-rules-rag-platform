@@ -44,6 +44,7 @@ from app.services.container import build_services  # noqa: E402
 from app.services.persistence import MockPersistence  # noqa: E402
 
 DEFAULT_SET = BACKEND_DIR / "tests" / "golden" / "qa_set.json"
+TOOL_SET = BACKEND_DIR / "tests" / "golden" / "tool_set.json"
 
 
 def load_set(path: Path) -> list[dict]:
@@ -143,7 +144,83 @@ async def run_e2e(services, settings, items) -> dict:
     }
 
 
-def format_markdown(settings: Settings, retrieval: dict, e2e: dict | None, count: int) -> str:
+async def run_tool_eval(services, settings: Settings, items: list[dict], *, enabled: bool) -> dict:
+    """工具选型评测：同一批题，分别在开启/关闭校园服务工具时跑一遍。
+
+    指标：
+    - hit_rate：期望工具真正被调用的比例（关闭时校园工具题目应全部落空，形成对照）
+    - rag_hit_rate：只统计 expect_tool=search_rules 的对照题命中率
+    - refused：被拒答的题数（有工具时这些实时问题不该拒答）
+    - p50_ms：单题端到端时延中位数
+    """
+    spec, entry = build_graph(settings)
+    previous = getattr(settings, "campus_tools_enabled", True)
+    settings.campus_tools_enabled = enabled
+    hits = 0
+    rag_hits = 0
+    rag_total = 0
+    refused = 0
+    latencies: list[int] = []
+    details: list[dict] = []
+    try:
+        for item in items:
+            services.cache.clear()
+            engine = WorkflowEngine(spec, entry, services, settings)
+            started = time.perf_counter()
+            state = await engine.run(
+                AgentState(query=item["question"], user_id=9001)
+            )
+            elapsed = int((time.perf_counter() - started) * 1000)
+            latencies.append(elapsed)
+            called = [call.get("name", "") for call in (state.tool_calls or [])]
+            # 只认“成功执行”的工具：关闭组模型仍可能凭残存印象幻觉出工具名，
+            # 执行层会拦掉（success=False），这种调用不算命中，否则对照组被污染。
+            ok_called = [
+                call.get("name", "") for call in (state.tool_calls or []) if call.get("success")
+            ]
+            expected = item["expect_tool"]
+            matched = expected in ok_called
+            hits += 1 if matched else 0
+            if expected == "search_rules":
+                rag_total += 1
+                rag_hits += 1 if matched else 0
+            if state.refused:
+                refused += 1
+            details.append(
+                {
+                    "id": item["id"],
+                    "question": item["question"],
+                    "expect_tool": expected,
+                    "called": called,
+                    "called_success": ok_called,
+                    "matched": matched,
+                    "refused": state.refused,
+                    "latency_ms": elapsed,
+                    "answer_head": (state.answer or "")[:60],
+                }
+            )
+    finally:
+        settings.campus_tools_enabled = previous
+
+    latencies.sort()
+    return {
+        "enabled": enabled,
+        "hit_rate": hits / max(1, len(items)),
+        "rag_hit_rate": rag_hits / max(1, rag_total),
+        "refused": refused,
+        "total": len(items),
+        "p50_ms": statistics.median(latencies) if latencies else 0,
+        "details": details,
+    }
+
+
+def format_markdown(
+    settings: Settings,
+    retrieval: dict,
+    e2e: dict | None,
+    count: int,
+    tool_compare: dict | None = None,
+) -> str:
     lines = [
         "# 检索与生成评测报告",
         "",
@@ -174,6 +251,25 @@ def format_markdown(settings: Settings, retrieval: dict, e2e: dict | None, count
             f"| {e2e['refusal_acc']:.3f} | {e2e['citation_rate']:.3f} | {e2e['answered']} | "
             f"{e2e['p50_ms']} ms | {e2e['p95_ms']} ms |",
         ]
+    if tool_compare:
+        on, off = tool_compare["on"], tool_compare["off"]
+        lines += [
+            "",
+            "## 校园服务工具消融（CAMPUS_TOOLS_ENABLED 开 / 关）",
+            "",
+            f"- 题量：{on['total']} 题（其中 RAG 对照题按 `expect_tool=search_rules` 单列统计）",
+            "",
+            "| 配置 | 工具选对率 | RAG 对照题命中 | 被拒答题数 | p50 时延 |",
+            "| --- | --- | --- | --- | --- |",
+            f"| 开启校园工具 | {on['hit_rate']:.3f} | {on['rag_hit_rate']:.3f} | "
+            f"{on['refused']} | {on['p50_ms']} ms |",
+            f"| 关闭校园工具 | {off['hit_rate']:.3f} | {off['rag_hit_rate']:.3f} | "
+            f"{off['refused']} | {off['p50_ms']} ms |",
+            "",
+            "> 关闭后 `query_repair_status / query_my_reservations / query_location_availability / "
+            "query_lost_found` 不再下发给模型，实时业务问题只能走 RAG 或拒答——"
+            "这一列与开启列的差值即工具接入带来的增益。",
+        ]
     if settings.vector_mode == "mock":
         lines += [
             "",
@@ -198,6 +294,26 @@ async def main_async(args) -> int:
 
     retrieval = await run_retrieval(services, settings, items, modes)
     e2e = await run_e2e(services, settings, items) if args.with_llm else None
+    tool_compare = None
+    if args.with_tools:
+        tool_items = load_set(Path(args.tool_set))
+        if args.limit:
+            tool_items = tool_items[: args.limit]
+        # 开/关各跑一遍，得到同一批题的有无工具对照
+        tool_compare = {
+            "on": await run_tool_eval(services, settings, tool_items, enabled=True),
+            "off": await run_tool_eval(services, settings, tool_items, enabled=False),
+        }
+        if args.verbose:
+            print("\n=== 工具选型逐题明细 ===")
+            for label, key in (("开启", "on"), ("关闭", "off")):
+                print(f"\n[{label}校园工具]")
+                for row in tool_compare[key]["details"]:
+                    flag = "OK " if row["matched"] else "!! "
+                    print(
+                        f"{flag}{row['id']:4s} 期望={row['expect_tool']:28s} "
+                        f"实际={','.join(row['called']) or '（未调用任何工具）'}"
+                    )
     if e2e and args.verbose:
         expected_map = {item["id"]: item["answerable"] for item in items}
         print("\n=== 逐题明细 ===")
@@ -210,7 +326,7 @@ async def main_async(args) -> int:
                 f"{row['grounding_status']:10s} {row['latency_ms']:6d}ms  {row['question'][:26]}"
             )
 
-    report = format_markdown(settings, retrieval, e2e, len(items))
+    report = format_markdown(settings, retrieval, e2e, len(items), tool_compare)
     print(report)
     if args.md:
         target = Path(args.md)
@@ -221,7 +337,11 @@ async def main_async(args) -> int:
         target = Path(args.json)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
-            json.dumps({"retrieval": retrieval, "e2e": e2e}, ensure_ascii=False, indent=2),
+            json.dumps(
+                {"retrieval": retrieval, "e2e": e2e, "tool_compare": tool_compare},
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
         print(f"[eval] JSON 结果已写入 {target}")
@@ -242,6 +362,14 @@ def main() -> int:
     parser.add_argument("--only", default="vector,graph,both", help="融合配置，逗号分隔")
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 题")
     parser.add_argument("--with-llm", action="store_true", help="额外跑端到端（会调用大模型）")
+    parser.add_argument(
+        "--with-tools",
+        action="store_true",
+        help="跑校园服务工具消融：同一批题分别在 CAMPUS_TOOLS_ENABLED 开/关时各跑一遍（会调用大模型）",
+    )
+    parser.add_argument(
+        "--tool-set", default=str(TOOL_SET), help="工具选型评测集 JSON 路径"
+    )
     parser.add_argument(
         "--fusion", default="", choices=["", "append", "gated", "rrf"], help="覆盖融合策略，用于消融对比"
     )

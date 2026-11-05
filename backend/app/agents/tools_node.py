@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
 from app.agents.prompting import _history_messages, _prompt_question
-from app.agents.prompts import SYSTEM_PROMPT, TOOL_SYSTEM_PROMPT
+from app.agents.prompts import SYSTEM_PROMPT, tool_system_prompt
+from app.agents.fusion import _evidence_key
 from app.agents.runtime import NodeContext
 from app.agents.state import AgentState
-from app.agents.tools import TOOL_DEFINITIONS, ToolRunner
+from app.agents.tools import ToolRunner, active_tool_definitions
 from app.schemas.chat import Evidence, SourceItem
 
 logger = logging.getLogger("app.agents")
@@ -24,7 +26,9 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     run_id = state.run_id or uuid.uuid4().hex[:12]
     runner = ToolRunner(ctx.services, ctx.settings)
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": TOOL_SYSTEM_PROMPT}]
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": tool_system_prompt(ctx.settings)}
+    ]
     messages.extend(_history_messages(state, limit=6))
     messages.append({"role": "user", "content": _prompt_question(state)})
 
@@ -35,7 +39,9 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
 
     for _ in range(max(1, ctx.settings.max_tool_rounds)):
         try:
-            assistant = await ctx.services.llm.chat_with_tools(messages, TOOL_DEFINITIONS)
+            assistant = await ctx.services.llm.chat_with_tools(
+                messages, active_tool_definitions(ctx.settings)
+            )
         except Exception:  # noqa: BLE001 —— LLM/Tool 故障时回退到确定性 RAG
             logger.exception("Tool Calling LLM 调用失败，回退标准 RAG")
             break
@@ -176,7 +182,12 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
             "role": "system",
             "content": (
                 SYSTEM_PROMPT
-                + "\n5. 本轮已真实调用业务工具，请依据【工具结果】回答，不要编造工具没有返回的信息。"
+                + "\n5. 本轮已真实调用业务工具，请依据【工具结果】回答，不要编造工具没有返回的信息。\n"
+                "6. 若工具结果是场馆余量：列出可预约的时段，并提示“告诉我要约的位置和时段，"
+                "我可以生成预约草稿，确认后才会占用”——本系统支持预约（本规则优先于第 2 条），"
+                "禁止回答“无法代为预约”“请咨询辅导员/学生工作处”这类话术。\n"
+                "7. 若工具结果是预约草稿：说明这是待确认草稿，请用户点击下方“确认预约”按钮，"
+                "不要说“已预约成功”。"
             ),
         }
     ]
@@ -195,12 +206,31 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     async for piece in ctx.services.llm.stream(answer_messages):
         pieces.append(piece)
         await ctx.delta(piece)
-    await ctx.emit("meta", {"sources": [source.model_dump() for source in sources], "cached": False})
+    # 工具可能被 LLM 连续调用多次（ReAct 两轮），同一公告会被重复收录。
+    # tool-only 分支不经过 fuse_evidence，去重必须在这里做。
+    unique_evidence: list[Evidence] = []
+    unique_sources: list[SourceItem] = []
+    seen_evidence: set[tuple[str, str, str]] = set()
+    seen_sources: set[tuple[str, str, str]] = set()
+    for item in evidence:
+        key = _evidence_key(item)
+        if key not in seen_evidence:
+            seen_evidence.add(key)
+            unique_evidence.append(item)
+    for source in sources:
+        key = (source.type, re.sub(r"\s+", "", source.snippet or "")[:120], "")
+        if key not in seen_sources:
+            seen_sources.add(key)
+            unique_sources.append(source)
+
+    await ctx.emit(
+        "meta", {"sources": [source.model_dump() for source in unique_sources], "cached": False}
+    )
     return {
         **update,
         "tool_only": True,
-        "sources": sources,
-        "evidence": evidence,
+        "sources": unique_sources,
+        "evidence": unique_evidence,
         "evidence_score": 0.9,
         "answer": "".join(pieces),
         # P0-4：工具直答没有走引用校验，必须标 skipped 而不是伪造成 verified

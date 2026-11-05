@@ -225,3 +225,11 @@ __marimo__/
 
 # WorkBuddy 工具工作目录（本地记忆，不进版本库）
 .workbuddy/
+
+# 紧急横幅验证：本地依赖与产物
+node_modules/
+.buildtmp/
+screenshots/
+
+# PPT 工具临时状态
+.slidep/

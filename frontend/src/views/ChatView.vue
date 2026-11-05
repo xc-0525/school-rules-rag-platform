@@ -33,7 +33,7 @@
         :key="message.clientId ?? index"
         :message="message"
         @feedback="(rating) => onFeedback(message, rating)"
-        @confirm-ticket="(draft) => onConfirmTicket(index, draft)"
+        @confirm-draft="(draft) => onConfirmDraft(index, draft)"
       />
     </div>
 
@@ -58,8 +58,8 @@ import { ElMessage } from 'element-plus'
 import MessageBubble from '../components/MessageBubble.vue'
 import { useChatStore } from '../stores/chat'
 import { streamChat } from '../api/sse'
-import { confirmTicket, sendFeedback } from '../api/client'
-import type { Message, TicketDraft } from '../types'
+import { confirmTicket, createReservation, sendFeedback } from '../api/client'
+import type { Message, ToolDraft } from '../types'
 
 const store = useChatStore()
 const input = ref('')
@@ -148,7 +148,27 @@ onBeforeUnmount(() => {
   controller?.abort()
 })
 
-async function onConfirmTicket(index: number, draft: TicketDraft) {
+async function onConfirmDraft(index: number, draft: ToolDraft) {
+  if (draft.action === 'create_reservation') {
+    if (!draft.location_id || !draft.res_date || !draft.slot) {
+      ElMessage.error('预约草稿缺少位置/日期参数，请重新发起对话')
+      return
+    }
+    try {
+      const result = await createReservation({
+        location_id: draft.location_id,
+        res_date: draft.res_date,
+        slot: draft.slot,
+      })
+      store.setReservationNo(index, result.id)
+      ElMessage.success(`已预约：${result.location_name} ${result.res_date} ${result.slot_label}`)
+    } catch (error: any) {
+      // 409 = 时段被抢，提示换时段
+      ElMessage.error(`预约失败：${error?.message || error}`)
+    }
+    return
+  }
+
   try {
     const result = await confirmTicket({
       title: draft.title,

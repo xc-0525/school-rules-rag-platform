@@ -64,7 +64,17 @@ class ToolRunnerTests(unittest.TestCase):
         names = {item["function"]["name"] for item in TOOL_DEFINITIONS}
         self.assertEqual(
             names,
-            {"search_rules", "query_announcements", "create_ticket"},
+            {
+                "search_rules",
+                "query_announcements",
+                "create_ticket",
+                # 校园服务只读工具（CAMPUS_TOOLS_ENABLED 控制是否下发给模型）
+                "query_repair_status",
+                "query_my_reservations",
+                "query_location_availability",
+                "query_lost_found",
+                "create_reservation_draft",
+            },
         )
 
     def test_search_rules_returns_evidence(self) -> None:

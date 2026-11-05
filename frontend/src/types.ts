@@ -45,13 +45,23 @@ export interface RuntimeInfo {
   latency_ms: number
 }
 
-export interface TicketDraft {
-  status: string
+export interface ToolDraft {
+  status?: string
   requires_confirmation: boolean
+  /** 决定前端确认按钮的行为：工单走 POST /tickets，预约走 POST /reservations */
+  action?: 'create_ticket' | 'create_reservation'
   title: string
   description: string
   category: string
+  /** 预约草稿专用 */
+  location_id?: number
+  res_date?: string
+  slot?: string
+  slot_label?: string
 }
+
+/** 兼容旧命名 */
+export type TicketDraft = ToolDraft
 
 export interface ChatDonePayload {
   answer: string
@@ -90,10 +100,35 @@ export interface Message {
   runtime?: RuntimeInfo
   pending?: boolean
   error?: string
-  /** 待确认的工单草稿 */
-  toolDrafts?: TicketDraft[]
+  /** 待确认的操作草稿（工单 / 预约） */
+  toolDrafts?: ToolDraft[]
   /** 确认后拿到的工单号 */
   ticketNo?: string
+  /** 确认后拿到的预约记录号 */
+  reservationNo?: number
+}
+
+export interface NoticeItem {
+  id: number
+  title: string
+  content: string
+  category: string
+  category_label: string
+  is_pinned: boolean
+  priority: 'normal' | 'urgent'
+  is_urgent: boolean
+  status: string
+  publisher: string
+  effective_at: string | null
+  expires_at: string | null
+  created_at: string | null
+  updated_at: string | null
+  is_expired: boolean
+}
+
+export interface NoticeCategoryOption {
+  code: string
+  label: string
 }
 
 export interface ConversationItem {
@@ -151,6 +186,21 @@ export interface HealthInfo {
   }
 }
 
+export interface DedupeItem {
+  label: string
+  chapter: string
+  snippet: string
+}
+
+export interface DedupeInfo {
+  total: number
+  added: number
+  duplicates: number
+  added_items: DedupeItem[]
+  duplicate_items: DedupeItem[]
+  skipped_all: boolean
+}
+
 export interface UploadResult {
   document_id: number
   title: string
@@ -159,4 +209,88 @@ export interface UploadResult {
   chapters: number
   status: string
   message: string
+  dedupe?: DedupeInfo | null
+}
+
+// ---------------- 校园服务：报修 / 预约 / 失物招领 ----------------
+
+export interface RepairItem {
+  id: number
+  user_id: number
+  title: string
+  description: string
+  category: string
+  category_label: string
+  building: string
+  room: string
+  contact: string
+  status: 'pending' | 'processing' | 'completed' | 'closed'
+  handler_id: number | null
+  handler_remark: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface LocationItem {
+  id: number
+  name: string
+  zone: string
+  capacity: number
+  is_active: boolean
+}
+
+export interface SlotAvailability {
+  slot: string
+  label: string
+  booked: boolean
+}
+
+export interface AvailabilityInfo {
+  location_id: number
+  date: string
+  slots: SlotAvailability[]
+  range_note: string
+}
+
+export interface ReservationItem {
+  id: number
+  location_id: number
+  location_name: string
+  location_zone: string
+  user_id: number
+  res_date: string
+  slot: string
+  slot_label: string
+  status: 'reserved' | 'cancelled' | 'fulfilled' | 'no_show'
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface LostFoundItem {
+  id: number
+  user_id: number
+  kind: 'lost' | 'found'
+  kind_label: string
+  title: string
+  description: string
+  location: string
+  contact: string
+  images: string[]
+  status: 'pending_review' | 'published' | 'rejected' | 'resolved' | 'removed'
+  review_remark: string | null
+  reviewed_at: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface UploadedImage {
+  url: string
+  size_bytes: number
+  content_type: string
+}
+
+export interface OcrStatus {
+  available: boolean
+  engine: string
+  hint: string
 }

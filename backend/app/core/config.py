@@ -115,6 +115,16 @@ class Settings:
     # ---- 工具副作用（P1-7）----
     ticket_idempotency_seconds: int = 600    # 同标题/描述窗口内复用同一工单
     ticket_require_intent: bool = True       # 用户没表达投诉/报修意图时不直接建单
+    campus_tools_enabled: bool = True        # 0=关闭校园服务只读工具，用于有/无工具消融实验
+
+    # ---- 校园服务模块（报修 / 预约 / 失物招领，见 docs/campus-modules.md）----
+    repair_per_user_per_day: int = 3         # 报修频率：同一用户每天最多提交条数
+    repair_duplicate_hours: int = 24         # 同房间+同类，窗口内已有申请即判重复（不限状态）
+    reservation_days_ahead: int = 7          # 只能预约明天起 N 天内
+    reservation_max_active_per_user: int = 3 # 每人同时有效的预约上限
+    lostfound_image_max_mb: int = 5          # 失物招领图片单张大小上限
+    lostfound_max_images: int = 3            # 每条目最多图片数
+    lostfound_review_timeout_hours: int = 48 # 审批提醒阈值（超过视为待办积压，供管理端查询）
 
     # ---- 真实存储（Day2 起使用）----
     mysql_url: str = ""
@@ -182,6 +192,14 @@ class Settings:
             cache_max_entries=_env_int("CACHE_MAX_ENTRIES", 1000),
             ticket_idempotency_seconds=_env_int("TICKET_IDEMPOTENCY_SECONDS", 600),
             ticket_require_intent=_env_flag("TICKET_REQUIRE_INTENT", True),
+            campus_tools_enabled=_env_flag("CAMPUS_TOOLS_ENABLED", True),
+            repair_per_user_per_day=_env_int("REPAIR_PER_USER_PER_DAY", 3),
+            repair_duplicate_hours=_env_int("REPAIR_DUPLICATE_HOURS", 24),
+            reservation_days_ahead=_env_int("RESERVATION_DAYS_AHEAD", 7),
+            reservation_max_active_per_user=_env_int("RESERVATION_MAX_ACTIVE_PER_USER", 3),
+            lostfound_image_max_mb=_env_int("LOSTFOUND_IMAGE_MAX_MB", 5),
+            lostfound_max_images=_env_int("LOSTFOUND_MAX_IMAGES", 3),
+            lostfound_review_timeout_hours=_env_int("LOSTFOUND_REVIEW_TIMEOUT_HOURS", 48),
             mysql_url=os.getenv("MYSQL_URL", "").strip(),
             qdrant_path=os.getenv("QDRANT_PATH", "").strip(),
             qdrant_url=os.getenv("QDRANT_URL", "").strip(),

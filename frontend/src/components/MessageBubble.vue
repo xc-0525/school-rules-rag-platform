@@ -51,10 +51,18 @@
         class="ticket-draft"
       >
         <div v-for="(draft, index) in message.toolDrafts" :key="index" class="ticket-draft-item">
-          <div class="ticket-draft-title">工单草稿 · {{ draft.title }}（{{ draft.category }}）</div>
+          <div class="ticket-draft-title">
+            <template v-if="draft.action === 'create_reservation'">
+              预约草稿 · {{ draft.title }}
+            </template>
+            <template v-else>工单草稿 · {{ draft.title }}（{{ draft.category }}）</template>
+          </div>
           <div class="ticket-draft-desc">{{ draft.description }}</div>
           <div class="ticket-draft-actions">
-            <el-tag v-if="message.ticketNo" type="success" effect="plain">
+            <el-tag v-if="draft.action === 'create_reservation' && message.reservationNo" type="success" effect="plain">
+              已预约：#{{ message.reservationNo }}
+            </el-tag>
+            <el-tag v-else-if="message.ticketNo" type="success" effect="plain">
               已提交：{{ message.ticketNo }}
             </el-tag>
             <el-button
@@ -62,11 +70,17 @@
               size="small"
               type="primary"
               :loading="confirming"
-              @click="confirmTicket(draft)"
+              @click="confirmDraft(draft)"
             >
-              确认提交工单
+              {{ draft.action === 'create_reservation' ? '确认预约' : '确认提交工单' }}
             </el-button>
-            <span class="ticket-draft-hint">未确认前不会写入工单库</span>
+            <span class="ticket-draft-hint">
+              {{
+                draft.action === 'create_reservation'
+                  ? '未确认前不会占用座位'
+                  : '未确认前不会写入工单库'
+              }}
+            </span>
           </div>
         </div>
       </div>
@@ -86,7 +100,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { Message, TicketDraft } from '../types'
+import type { Message, ToolDraft } from '../types'
 import { renderMarkdown } from '../utils/markdown'
 import AgentTrace from './AgentTrace.vue'
 import SourceList from './SourceList.vue'
@@ -94,8 +108,9 @@ import SourceList from './SourceList.vue'
 const props = defineProps<{ message: Message }>()
 const emit = defineEmits<{
   (event: 'feedback', rating: number): void
-  (event: 'confirmTicket', draft: TicketDraft): void
+  (event: 'confirmDraft', draft: ToolDraft): void
 }>()
+
 const rating = ref(0)
 const confirming = ref(false)
 
@@ -104,8 +119,8 @@ function submitFeedback(value: number) {
   emit('feedback', value)
 }
 
-function confirmTicket(draft: TicketDraft) {
+function confirmDraft(draft: ToolDraft) {
   confirming.value = true
-  emit('confirmTicket', draft)
+  emit('confirmDraft', draft)
 }
 </script>

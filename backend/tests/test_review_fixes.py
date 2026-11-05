@@ -415,18 +415,26 @@ class RateLimitTests(unittest.TestCase):
 class FusionGateTests(unittest.TestCase):
     """P1-3 质量闸门：弱图谱不得稀释向量召回。"""
 
-    def _fuse(self, settings, vector, graph):
-        state = AgentState(query="测试", vector_hits=vector, graph_paths=graph)
+    def _fuse(self, settings, vector, graph, tool_evidence=None):
+        state = AgentState(
+            query="测试",
+            vector_hits=vector,
+            graph_paths=graph,
+            tool_evidence=tool_evidence or [],
+        )
         ctx = NodeContext(services=None, settings=settings, bus=NullBus())
         return asyncio.run(nodes.fuse_evidence(state, ctx))
 
     @staticmethod
     def _vector(title: str, score: float) -> Evidence:
-        return Evidence(type="vector", title=title, detail="第1条", snippet="v", score=score)
+        # snippet 带上标题：去重按条款正文判定，固定内容会让不同条款被误判为同一条
+        return Evidence(type="vector", title=title, detail="第1条", snippet=f"v-{title}", score=score)
 
     @staticmethod
     def _graph(title: str, score: float) -> Evidence:
-        return Evidence(type="graph", title=f"知识图谱 · {title}", detail="第2条", snippet="g", score=score)
+        return Evidence(
+            type="graph", title=f"知识图谱 · {title}", detail="第2条", snippet=f"g-{title}", score=score
+        )
 
     def test_append_keeps_vector_order_and_puts_graph_last(self) -> None:
         """append 模式：向量定排序，图谱只追加未命中条款（实测 MRR 不劣于仅向量）。"""
@@ -446,12 +454,21 @@ class FusionGateTests(unittest.TestCase):
         # 真实场景下同一条款的正文一致，只是图谱多了标题前缀
         graph = [
             Evidence(
-                type="graph", title="知识图谱 · 《A》", detail="第1条", snippet="v", score=0.95
+                type="graph", title="知识图谱 · 《A》", detail="第1条", snippet="v-《A》", score=0.95
             )
         ]
         result = self._fuse(settings, vector, graph)
         self.assertEqual(len(result["evidence"]), 1, "同一条款不应重复进入证据列表")
         self.assertEqual(result["evidence_meta"]["graph_kept"], 0)
+
+    def test_append_dedupes_within_tool_evidence(self) -> None:
+        """LLM 连续调两次工具时，同一公告不应在来源里重复出现。"""
+        settings = make_settings(fusion_mode="append")
+        dup = Evidence(type="tool", title="公告：停水通知", detail="校园公告", snippet="本周六停水", score=1.0)
+        vector = [self._vector("《A》", 0.90)]
+        result = self._fuse(settings, vector, [], tool_evidence=[dup, dup])
+        self.assertEqual(len(result["evidence"]), 2, "同一公告只保留一条")
+        self.assertEqual(sum(1 for item in result["evidence"] if item.type == "tool"), 1)
 
     def test_append_respects_share_cap(self) -> None:
         settings = make_settings(fusion_mode="append", graph_max_share=0.5)
