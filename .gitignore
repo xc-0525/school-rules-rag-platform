@@ -230,3 +230,6 @@ __marimo__/
 node_modules/
 .buildtmp/
 screenshots/
+
+# PPT 工具临时状态
+.slidep/
