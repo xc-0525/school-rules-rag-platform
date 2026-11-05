@@ -399,6 +399,16 @@ docker compose run --rm ingest   # 首次入库校规语料
 完整步骤（服务器要求、HTTPS、备份、排错）见 [`docs/deploy-public.md`](docs/deploy-public.md)。
 > Docker 使用 Qdrant **服务端模式**，与本机嵌入式数据不互通，切换后需要重新入库。
 
+**配域名 + HTTPS**（让简历上能写 `https://xxx.top` 而不是裸 IP）：
+
+```bash
+# 证书就位后，三个 -f 一起启动
+docker compose -f docker-compose.yml -f docker-compose.4g.yml -f docker-compose.https.yml up -d
+```
+
+域名注册、ICP 备案、acme.sh 申请证书、Cloudflare 免备案方案、排错清单，完整流程见
+[`docs/deploy-https.md`](docs/deploy-https.md)。
+
 ### 6.5 v2 后端配置（完整 `.env` 参考）
 
 ```env

@@ -234,6 +234,14 @@ screenshots/
 # PPT 工具临时状态
 .slidep/
 
+# TLS 证书私钥与 ACME 校验目录（绝不入库）
+certs/
+certbot/
+
+# Let's Encrypt 相关备份
+*.pem
+!frontend/**/*.pem
+
 # 课程交付物：仅本地保留，不入库
 答辩PPT/
 output/

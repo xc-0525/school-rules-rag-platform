@@ -101,6 +101,9 @@ services:
         condition: service_healthy
     ports:
       - "${HTTP_PORT:-8080}:80"
+    volumes:
+      # Let's Encrypt webroot 校验目录（acme.sh 申请/续期时写入）
+      - ./certbot/www:/var/www/certbot
     networks: [appnet]
 
   # 首次部署：下载 BGE 模型到 ./models（profile=init，不参与默认 up）
