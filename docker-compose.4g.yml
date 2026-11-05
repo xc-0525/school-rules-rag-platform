@@ -1,0 +1,45 @@
+# 2 核 4G 小内存机型覆盖（腾讯云 CVM 蜂驰型试用机 / 轻量 2C4G 同款）
+#
+# 用法（必须两个 -f 一起用，单独用本文件不完整）：
+#   docker compose -f docker-compose.yml -f docker-compose.4g.yml up -d --build
+#
+# 为什么需要它：默认配置按 4C8G 调（Neo4j heap 1G + pagecache 512M），
+# 4G 机器上会 OOM。本文件把四个吃内存的服务压到 ~3.6G 总预算，配合 2G swap 可稳定跑。
+# 前提：宿主机已加 swap（见 docs/deploy-trial-2c4g.md 第 2 步）
+
+services:
+  mysql:
+    # 覆盖 command 会整体替换，基础参数必须重写一遍
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --innodb-buffer-pool-size=128M
+      - --performance-schema=OFF
+      - --max-connections=60
+      - --table-open-cache=200
+    mem_limit: 640m
+
+  neo4j:
+    environment:
+      # 默认 1G heap 在 4G 机上直接吃掉四分之一内存，压到 512M
+      NEO4J_server_memory_heap_initial__size: 256M
+      NEO4J_server_memory_heap_max__size: 512M
+      NEO4J_server_memory_pagecache_size: 128M
+    mem_limit: 1024m
+
+  qdrant:
+    environment:
+      QDRANT__LOG_LEVEL: WARN
+    mem_limit: 320m
+
+  backend:
+    environment:
+      # torch/BGE 默认按核数开线程，2 核机上会把 CPU 打满反而更慢
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      TOKENIZERS_PARALLELISM: "false"
+      MALLOC_ARENA_MAX: "2"
+    mem_limit: 1600m
+
+  frontend:
+    mem_limit: 64m
