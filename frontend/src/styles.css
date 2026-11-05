@@ -291,7 +291,7 @@ body {
 .aside-footer {
   position: relative;
   z-index: 1;
-  padding: 14px 20px 16px;
+  padding: 14px 20px 18px;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
   font-size: 12px;
   color: rgba(226, 232, 240, 0.5);
@@ -328,17 +328,6 @@ body {
   white-space: nowrap;
 }
 
-.mode-line {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 4px;
-}
-
-.mode-line b {
-  color: #e2e8f0;
-  font-weight: 500;
-}
-
 .mode-warn {
   margin-top: 8px;
   font-size: 11.5px;
@@ -346,22 +335,11 @@ body {
 }
 
 .aside-motto {
-  margin: 13px 0 10px;
+  margin: 13px 0 2px;
   font-family: var(--font-serif);
   font-size: 11.5px;
   letter-spacing: 3px;
   color: rgba(194, 161, 91, 0.88);
-}
-
-.aside-logout {
-  margin-top: 2px;
-  color: rgba(226, 232, 240, 0.55) !important;
-  padding: 0;
-  font-size: 12px;
-}
-
-.aside-logout:hover {
-  color: #fff !important;
 }
 
 /* ---------------- 顶栏 ---------------- */

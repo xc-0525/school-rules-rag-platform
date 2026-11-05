@@ -57,7 +57,6 @@
         </div>
         <div v-if="health && !health.vector_ready" class="mode-warn">向量未预热完成</div>
         <div class="aside-motto">追求卓越 · 走向成功</div>
-        <el-button link class="aside-logout" @click="handleLogout">退出登录</el-button>
       </div>
     </el-aside>
 
