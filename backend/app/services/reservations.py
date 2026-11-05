@@ -259,12 +259,15 @@ def create_reservation(
         if location is None or not location.is_active:
             raise ReservationRuleError("位置不存在或暂未开放预约")
 
-        # 用户配额：有效预约数
+        # 用户配额：只统计“今天及以后”的有效预约
+        # （过期未履约的记录若继续占配额，用户取消完仍会被判满，实测踩到）
+        today_iso = date.today().isoformat()
         active_count = (
             session.query(LocationReservation)
             .filter(
                 LocationReservation.user_id == user_id,
                 LocationReservation.status.in_(ACTIVE_RESERVATION_STATUSES),
+                LocationReservation.res_date >= today_iso,
             )
             .count()
         )
@@ -334,8 +337,14 @@ def create_reservation(
 
 
 def _check_user_quota_mock(user_id: int, max_active: int) -> None:
+    """配额只算今天及以后的有效预约（与 MySQL 实现口径一致）。"""
+    today_iso = date.today().isoformat()
     active = sum(
-        1 for r in _mock_reservations if r["user_id"] == user_id and r["status"] in ACTIVE_RESERVATION_STATUSES
+        1
+        for r in _mock_reservations
+        if r["user_id"] == user_id
+        and r["status"] in ACTIVE_RESERVATION_STATUSES
+        and _iso(r.get("res_date")) >= today_iso
     )
     if active >= max_active:
         raise ReservationRuleError(

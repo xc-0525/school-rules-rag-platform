@@ -896,3 +896,9 @@ body {
     max-width: 92%;
   }
 }
+
+/* 预约二次确认：保留位置/日期/时段三行展示（MessageBox 挂在 body，需全局样式） */
+.reserve-confirm-box .el-message-box__message {
+  white-space: pre-line;
+  line-height: 1.7;
+}

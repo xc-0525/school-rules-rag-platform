@@ -394,10 +394,19 @@ class RateLimitTests(unittest.TestCase):
         return TestClient(create_app(settings, services=services))
 
     def test_per_minute_limit(self) -> None:
+        """分钟限流只作用于写请求；GET 列表不计数（否则翻页就会 429、页面空白）。"""
         client = self._client(rate_limit_per_minute=2, rate_limit_per_day=0)
-        codes = [client.get("/api/v1/conversations").status_code for _ in range(3)]
-        self.assertEqual(codes[:2], [200, 200])
-        self.assertEqual(codes[2], 429)
+        # GET 不计数：连打 5 次也应全部 200
+        codes = [client.get("/api/v1/conversations").status_code for _ in range(5)]
+        self.assertEqual(codes, [200] * 5)
+
+        # POST 计数：第 3 次触发 429
+        posts = [
+            client.post("/api/v1/tickets", json={"title": "测试", "description": "测试工单描述"}).status_code
+            for _ in range(3)
+        ]
+        self.assertEqual(posts[:2], [201, 201])
+        self.assertEqual(posts[2], 429)
 
     def test_daily_quota(self) -> None:
         client = self._client(rate_limit_per_minute=0, rate_limit_per_day=1)

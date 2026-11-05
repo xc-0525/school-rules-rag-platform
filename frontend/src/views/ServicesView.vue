@@ -459,9 +459,26 @@ async function loadAvailability() {
 }
 
 async function book(loc: LocationItem, slot: string) {
+  const slotInfo = availability.value.slots.find((s) => s.slot === slot)
+  const slotLabel = slotInfo?.label || slot
+  try {
+    await ElMessageBox.confirm(
+      `位置：${loc.name}\n日期：${reserveDate.value}\n时段：${slotLabel}（余 ${slotInfo?.remaining ?? '-'} 个）`,
+      '确认预约',
+      {
+        type: 'info',
+        confirmButtonText: '确认预约',
+        cancelButtonText: '再想想',
+        // 保留换行，避免三行信息挤成一句
+        customClass: 'reserve-confirm-box',
+      },
+    )
+  } catch {
+    return
+  }
   try {
     await createReservation({ location_id: loc.id, res_date: reserveDate.value, slot })
-    ElMessage.success(`已预约 ${loc.name} ${reserveDate.value}`)
+    ElMessage.success(`已预约 ${loc.name} ${reserveDate.value} ${slotLabel}`)
     await Promise.all([loadAvailability(), loadReservations()])
   } catch (error: any) {
     // 409 冲突后端返回 {message, conflict_reservation_id}

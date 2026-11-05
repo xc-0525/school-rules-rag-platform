@@ -30,7 +30,14 @@ function withAuth(headersInit?: HeadersInit): Headers {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(BASE + path, { ...init, headers: withAuth(init?.headers) })
+  let response = await fetch(BASE + path, { ...init, headers: withAuth(init?.headers) })
+
+  // 429 只读请求自动重试一次：限流偶尔打满时不应让整页列表变空白
+  if (response.status === 429 && (!init?.method || init.method === 'GET')) {
+    const waitSec = Math.min(Math.max(Number(response.headers.get('Retry-After') || 2), 1), 10)
+    await new Promise((resolve) => setTimeout(resolve, waitSec * 1000))
+    response = await fetch(BASE + path, { ...init, headers: withAuth(init?.headers) })
+  }
 
   if (response.status === 401 && !path.includes('/auth/login')) {
     clearSession()

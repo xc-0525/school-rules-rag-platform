@@ -75,7 +75,7 @@ class Settings:
 
     # ---- 限流 / 配额（P0-3，公网部署必备）----
     rate_limit_enabled: bool = True
-    rate_limit_per_minute: int = 20          # 单主体每分钟请求数
+    rate_limit_per_minute: int = 60          # 单主体每分钟写请求数（GET 不计入）
     rate_limit_per_day: int = 300            # 单主体每日问答数（只对 /chat 计数）
     rate_limit_concurrent: int = 1           # 单主体同时进行的问答数
 
@@ -168,7 +168,7 @@ class Settings:
             token_secret=os.getenv("AUTH_TOKEN_SECRET", "").strip(),
             token_ttl_seconds=_env_int("AUTH_TOKEN_TTL", 8 * 60 * 60),
             rate_limit_enabled=_env_flag("RATE_LIMIT_ENABLED", True),
-            rate_limit_per_minute=_env_int("RATE_LIMIT_PER_MINUTE", 20),
+            rate_limit_per_minute=_env_int("RATE_LIMIT_PER_MINUTE", 60),
             rate_limit_per_day=_env_int("RATE_LIMIT_PER_DAY", 300),
             rate_limit_concurrent=_env_int("RATE_LIMIT_CONCURRENT", 1),
             serve_frontend=_env_flag("SERVE_FRONTEND", False),

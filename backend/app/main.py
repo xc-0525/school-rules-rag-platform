@@ -137,6 +137,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         """
         if not settings.rate_limit_enabled or not request.url.path.startswith("/api/"):
             return await call_next(request)
+        # 只读请求不计数：一页要拉报修/预约/失物/位置/余量 5 个接口，
+        # 翻两次页签就打满分钟配额，页面会整块空白（实测踩到）。
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return await call_next(request)
         user = resolve_token(request.headers.get("authorization"))
         client_host = request.client.host if request.client else "unknown"
         key = f"u:{user.id}" if user else f"ip:{client_host}"

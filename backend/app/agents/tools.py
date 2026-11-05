@@ -1039,6 +1039,9 @@ class ToolRunner:
         except Exception:  # noqa: BLE001 —— 查不到就当没配额限制，交给确认接口兜底
             logger.exception("create_reservation_draft quota check failed")
             active = []
+        # 只算今天及以后的有效预约，过期记录不占名额（与服务层口径一致）
+        today_iso = date.today().isoformat()
+        active = [row for row in active if str(row.get("res_date") or "") >= today_iso]
         if len(active) >= max_active:
             return self._draft_error(
                 "create_reservation_draft",

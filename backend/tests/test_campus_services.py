@@ -227,6 +227,42 @@ class ReservationServiceTests(unittest.TestCase):
             )
         self.assertIn("已经预约过", str(ctx.exception))
 
+    def test_expired_reservation_not_in_quota(self) -> None:
+        """过期未履约的记录不占配额：否则用户把未来预约全取消后仍被判“已满”。"""
+        res_service.seed_mock_locations()
+        past = (date.today() - timedelta(days=3)).isoformat()
+        with res_service._mock_lock:
+            res_service._mock_reservations.append(
+                {
+                    "id": 9001,
+                    "location_id": 1,
+                    "user_id": 1,
+                    "res_date": past,
+                    "slot": "morning",
+                    "status": "reserved",
+                    "created_at": datetime.now(),
+                    "updated_at": None,
+                }
+            )
+        # 过期那条不计入，仍能约满 3 个（配额默认 3）
+        for offset, slot in enumerate(("morning", "afternoon", "evening")):
+            res_service.create_reservation(
+                self.settings,
+                1,
+                location_id=1,
+                res_date=(date.today() + timedelta(days=1 + offset)).isoformat(),
+                slot=slot,
+            )
+        with self.assertRaises(res_service.ReservationRuleError) as ctx:
+            res_service.create_reservation(
+                self.settings,
+                1,
+                location_id=1,
+                res_date=(date.today() + timedelta(days=5)).isoformat(),
+                slot="morning",
+            )
+        self.assertIn("最多同时保留", str(ctx.exception))
+
     def test_active_quota(self) -> None:
         slots = ["morning", "afternoon", "evening"]
         dates = [TOMORROW, (date.today() + timedelta(days=2)).isoformat(), (date.today() + timedelta(days=3)).isoformat()]
