@@ -93,6 +93,78 @@ docker compose -f docker-compose.yml -f docker-compose.4g.yml run --rm ingest
 
 21 篇语料 + 向量化，2 核机约 3–8 分钟。
 
+## 6.5 把本地数据搬上去（推荐，比现场造数据稳）
+
+本机能跑通，说明数据是好的。搬过去演示时账号、历史会话、公告、失物、预约、报修全都是现成的。
+
+**搬什么、不搬什么**（关键）：
+
+| 表 | 搬？ | 原因 |
+| --- | --- | --- |
+| users | ✅ | 密码哈希是 pbkdf2，跨机器可直接登录 |
+| conversations / messages | ✅ | 历史会话页有内容 |
+| announcements / tickets | ✅ | 公告、工单 |
+| repair_requests / reservable_locations / location_reservations / lost_found_items | ✅ | 报修、预约、失物 |
+| **documents / chunks** | ❌ | `file_path` 存的是 Windows 绝对路径，搬过去预览会 400；由第 6 步 ingest 在服务器重建 |
+
+**第 1 步：本机导出**（在项目根执行，输出到 `.buildtmp/migrate/data_only.sql`，约 45 KB）
+
+```bash
+cd backend && python - <<'EOF'
+import os, subprocess
+from pathlib import Path
+from sqlalchemy.engine import make_url
+from app.core.config import Settings
+
+url = make_url(Settings.from_env().mysql_url)
+out = Path("../.buildtmp/migrate/data_only.sql"); out.parent.mkdir(parents=True, exist_ok=True)
+env = {**os.environ, "MYSQL_PWD": url.password or ""}
+cmd = [r"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe",
+       "-h", url.host or "127.0.0.1", "-P", str(url.port or 3306), "-u", url.username or "root",
+       "--default-character-set=utf8mb4", "--single-transaction", "--no-tablespaces",
+       "--no-create-info", "--complete-insert", "--replace", "--skip-triggers",
+       url.database, "users","conversations","messages","announcements","tickets",
+       "repair_requests","reservable_locations","location_reservations",
+       "lost_found_items","feedback"]
+with out.open("w", encoding="utf-8", newline="\n") as fh:
+    r = subprocess.run(cmd, stdout=fh, stderr=subprocess.PIPE, env=env)
+print("exit:", r.returncode, "| size:", f"{out.stat().st_size/1024:.0f} KB")
+EOF
+```
+
+**第 2 步：传到服务器**
+
+```bash
+scp .buildtmp/migrate/data_only.sql root@<公网IP>:~/school-rules-rag-platform/data_only.sql
+```
+
+**第 3 步：服务器上导入**（必须在第 5 步 `up -d` 之后、第 6 步 ingest 之前；先跑完迁移脚本）
+
+```bash
+cd ~/school-rules-rag-platform
+C="docker compose -f docker-compose.yml -f docker-compose.4g.yml"
+$C exec backend python scripts/apply_notice_migration.py
+$C exec backend python scripts/apply_campus_service_migration.py
+$C exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-character-set=utf8mb4 school_rules_rag' < data_only.sql
+```
+
+用容器内的 `$MYSQL_ROOT_PASSWORD` 传密码，避免把明文写进 history。
+
+**第 4 步：核对 + 重建知识库**
+
+```bash
+$C exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" school_rules_rag -e \
+  "SELECT (SELECT COUNT(*) FROM users) users, (SELECT COUNT(*) FROM messages) msgs, \
+   (SELECT COUNT(*) FROM announcements) notices, (SELECT COUNT(*) FROM lost_found_items) lost;"
+$C run --rm ingest
+```
+
+期望：users ≈ 5、msgs ≈ 98、notices ≈ 4、lost ≈ 3；ingest 后再查 `documents` 应为 22、`chunks` ≈ 504。
+
+> 演示 PDF 去重时，直接在页面上重新上传 `.buildtmp/report/校园电动车管理办法_演示.pdf` 即可——
+> 正好现场演示“新增 6 条 / 跳过 3 条”的报告。
+
+
 ## 7. 上线自检（五条，全过才算成功）
 
 ```bash
