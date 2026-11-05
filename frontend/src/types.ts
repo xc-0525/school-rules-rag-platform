@@ -48,8 +48,22 @@ export interface RuntimeInfo {
 export interface ToolDraft {
   status?: string
   requires_confirmation: boolean
-  /** 决定前端确认按钮的行为：工单走 POST /tickets，预约走 POST /reservations */
-  action?: 'create_ticket' | 'create_reservation'
+  /**
+   * 决定前端确认按钮的行为（一个 action 对应一个后端接口，互不复用）：
+   * - create_ticket        → POST /tickets
+   * - create_reservation   → POST /reservations
+   * - create_lost_found    → POST /lost-found
+   * - create_repair        → POST /repairs
+   * - cancel_reservation   → POST /reservations/{id}/cancel
+   * - resolve_lost_found   → POST /lost-found/{id}/resolve
+   */
+  action?:
+    | 'create_ticket'
+    | 'create_reservation'
+    | 'create_lost_found'
+    | 'create_repair'
+    | 'cancel_reservation'
+    | 'resolve_lost_found'
   title: string
   description: string
   category: string
@@ -58,6 +72,17 @@ export interface ToolDraft {
   res_date?: string
   slot?: string
   slot_label?: string
+  /** 失物招领草稿专用 */
+  kind?: 'lost' | 'found'
+  location?: string
+  contact?: string
+  /** 报修草稿专用 */
+  repair_category?: string
+  building?: string
+  room?: string
+  /** 取消预约 / 失物结案专用 */
+  reservation_id?: number
+  item_id?: number
 }
 
 /** 兼容旧命名 */
@@ -106,6 +131,8 @@ export interface Message {
   ticketNo?: string
   /** 确认后拿到的预约记录号 */
   reservationNo?: number
+  /** 其他草稿确认后的结果文案，按草稿下标存放（发布/报修/取消/结案） */
+  draftResults?: Record<number, string>
 }
 
 export interface NoticeItem {

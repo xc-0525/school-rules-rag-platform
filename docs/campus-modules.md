@@ -220,8 +220,22 @@ pending_review ──approve──▶ published ──resolve(发布人/管理�
 
 ## 7. 问答接入（已实现，见 docs/工具接入改造指南.md）
 
-四个只读工具已注册到 Tool Calling：`query_repair_status` / `query_my_reservations` /
-`query_location_availability` / `query_lost_found`。写操作仍只留在页面，模型不碰。
+**读**：`query_repair_status` / `query_my_reservations` / `query_location_availability` /
+`query_lost_found` / `query_my_lost_found`。
+
+**写**：一律走"草稿 + 用户确认"，模型不直接落库。
+每个写操作一个独立工具、一个独立确认接口，互不复用：
+
+| 工具 | 业务动作 | 用户确认后调用 | 落库状态 |
+| --- | --- | --- | --- |
+| `create_reservation_draft` | 预约场馆 | `POST /api/v1/reservations` | reserved |
+| `create_lost_found_draft` | 发布寻物/招领 | `POST /api/v1/lost-found` | pending_review |
+| `create_repair_draft` | 提交寝室报修 | `POST /api/v1/repairs` | pending |
+| `cancel_reservation_draft` | 取消预约 | `POST /api/v1/reservations/{id}/cancel` | cancelled |
+| `resolve_lost_found_draft` | 失物结案 | `POST /api/v1/lost-found/{id}/resolve` | resolved |
+
+草稿阶段只做校验（复用服务层 `validate_payload` / `precheck_limits`，与真实写入同一套规则），
+不写任何数据；工具返回 `requires_confirmation=true` + `action`，前端按 action 渲染对应确认按钮。
 
 消融开关 `CAMPUS_TOOLS_ENABLED`（默认 1）同时作用于三处，保证对照组干净：
 ① 不下发工具定义；② 系统提示词裁掉校园工具清单与使用规则；③ 执行层拦截（模型幻觉调用也返回失败）。
@@ -232,6 +246,10 @@ pending_review ──approve──▶ published ──resolve(发布人/管理�
 | --- | --- | --- | --- | --- |
 | 开启校园工具 | 1.000 | 1.000 | 0 | 3512 ms |
 | 关闭校园工具 | 0.125 | 1.000 | 4 | 3245 ms |
+
+> 上表为"5 个只读工具"版本测得的基线数据；后续新增的 5 个写操作草稿工具不改变
+> 该题集的判定口径（题集只考查询类问题），其正确性由 `tests/test_tools_campus.py`
+> 的 23 项用例覆盖（草稿不落库、必填校验、限流预检、归属校验）。
 
 关闭组 0.125 只来自 t08（RAG 对照题），说明 7 道实时业务题在无工具时全部拿不到数据；
 两组 RAG 对照题命中率均为 1.000，证明接入工具没有抢走 `search_rules` 的调用。

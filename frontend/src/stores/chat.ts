@@ -102,6 +102,14 @@ export const useChatStore = defineStore('chat', {
       if (message) message.reservationNo = reservationId
     },
 
+    /** 其他草稿（发布失物/报修/取消预约/失物结案）确认后的结果文案 */
+    setDraftResult(index: number, draftIndex: number, text: string) {
+      const message = this.messages[index]
+      if (!message) return
+      if (!message.draftResults) message.draftResults = {}
+      message.draftResults[draftIndex] = text
+    },
+
     /** 用户主动取消（切页/新对话）时收尾，不当作错误 */
     cancelMessage(index: number) {
       const message = this.messages[index]

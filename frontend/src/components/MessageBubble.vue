@@ -51,36 +51,22 @@
         class="ticket-draft"
       >
         <div v-for="(draft, index) in message.toolDrafts" :key="index" class="ticket-draft-item">
-          <div class="ticket-draft-title">
-            <template v-if="draft.action === 'create_reservation'">
-              预约草稿 · {{ draft.title }}
-            </template>
-            <template v-else>工单草稿 · {{ draft.title }}（{{ draft.category }}）</template>
-          </div>
+          <div class="ticket-draft-title">{{ draftTitle(draft) }}</div>
           <div class="ticket-draft-desc">{{ draft.description }}</div>
           <div class="ticket-draft-actions">
-            <el-tag v-if="draft.action === 'create_reservation' && message.reservationNo" type="success" effect="plain">
-              已预约：#{{ message.reservationNo }}
-            </el-tag>
-            <el-tag v-else-if="message.ticketNo" type="success" effect="plain">
-              已提交：{{ message.ticketNo }}
+            <el-tag v-if="draftDone(draft, index)" type="success" effect="plain">
+              {{ draftDone(draft, index) }}
             </el-tag>
             <el-button
               v-else
               size="small"
               type="primary"
               :loading="confirming"
-              @click="confirmDraft(draft)"
+              @click="confirmDraft(draft, index)"
             >
-              {{ draft.action === 'create_reservation' ? '确认预约' : '确认提交工单' }}
+              {{ draftButtonText(draft) }}
             </el-button>
-            <span class="ticket-draft-hint">
-              {{
-                draft.action === 'create_reservation'
-                  ? '未确认前不会占用座位'
-                  : '未确认前不会写入工单库'
-              }}
-            </span>
+            <span v-if="!draftDone(draft, index)" class="ticket-draft-hint">{{ draftHint(draft) }}</span>
           </div>
         </div>
       </div>
@@ -108,7 +94,8 @@ import SourceList from './SourceList.vue'
 const props = defineProps<{ message: Message }>()
 const emit = defineEmits<{
   (event: 'feedback', rating: number): void
-  (event: 'confirmDraft', draft: ToolDraft): void
+  /** index 为该草稿在 toolDrafts 中的下标；done 由父组件在请求结束后调用，用于兜底关闭 loading */
+  (event: 'confirmDraft', draft: ToolDraft, index: number, done: () => void): void
 }>()
 
 const rating = ref(0)
@@ -119,8 +106,69 @@ function submitFeedback(value: number) {
   emit('feedback', value)
 }
 
-function confirmDraft(draft: ToolDraft) {
+function confirmDraft(draft: ToolDraft, index: number) {
   confirming.value = true
-  emit('confirmDraft', draft)
+  emit('confirmDraft', draft, index, () => {
+    confirming.value = false
+  })
+}
+
+/** 卡片标题：每个 action 一种业务语义，不做通用拼串 */
+function draftTitle(draft: ToolDraft): string {
+  const labels: Record<string, string> = {
+    create_reservation: '预约草稿',
+    create_lost_found: '失物招领草稿',
+    create_repair: '报修申请草稿',
+    cancel_reservation: '取消预约确认',
+    resolve_lost_found: '失物结案确认',
+  }
+  const label = labels[draft.action ?? ''] ?? '工单草稿'
+  const suffix = (draft.action ?? 'create_ticket') === 'create_ticket' ? `（${draft.category}）` : ''
+  return `${label} · ${draft.title}${suffix}`
+}
+
+function draftButtonText(draft: ToolDraft): string {
+  switch (draft.action) {
+    case 'create_reservation':
+      return '确认预约'
+    case 'create_lost_found':
+      return '确认发布'
+    case 'create_repair':
+      return '确认提交报修'
+    case 'cancel_reservation':
+      return '确认取消'
+    case 'resolve_lost_found':
+      return '确认已找回/已归还'
+    default:
+      return '确认提交工单'
+  }
+}
+
+function draftHint(draft: ToolDraft): string {
+  switch (draft.action) {
+    case 'create_reservation':
+      return '未确认前不会占用座位'
+    case 'create_lost_found':
+      return '确认后提交管理员审核，通过才公示'
+    case 'create_repair':
+      return '确认后才进入待受理'
+    case 'cancel_reservation':
+      return '确认后才会释放该时段'
+    case 'resolve_lost_found':
+      return '确认后不再出现在公示栏'
+    default:
+      return '未确认前不会写入工单库'
+  }
+}
+
+/** 已办结文案：工单/预约沿用消息级字段，其余按草稿下标取结果 */
+function draftDone(draft: ToolDraft, index: number): string {
+  if (draft.action === 'create_reservation' && props.message.reservationNo) {
+    return `已预约：#${props.message.reservationNo}`
+  }
+  if ((draft.action ?? 'create_ticket') === 'create_ticket' && props.message.ticketNo) {
+    return `已提交：${props.message.ticketNo}`
+  }
+  return props.message.draftResults?.[index] ?? ''
 }
 </script>

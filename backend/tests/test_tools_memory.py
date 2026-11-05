@@ -68,12 +68,19 @@ class ToolRunnerTests(unittest.TestCase):
                 "search_rules",
                 "query_announcements",
                 "create_ticket",
-                # 校园服务只读工具（CAMPUS_TOOLS_ENABLED 控制是否下发给模型）
+                # 校园服务工具（CAMPUS_TOOLS_ENABLED 控制是否下发给模型）
+                # 只读查询
                 "query_repair_status",
                 "query_my_reservations",
                 "query_location_availability",
                 "query_lost_found",
+                "query_my_lost_found",
+                # 写操作：只生成草稿，需用户确认后才落库
                 "create_reservation_draft",
+                "create_lost_found_draft",
+                "create_repair_draft",
+                "cancel_reservation_draft",
+                "resolve_lost_found_draft",
             },
         )
 

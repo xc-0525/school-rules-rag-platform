@@ -33,7 +33,7 @@
         :key="message.clientId ?? index"
         :message="message"
         @feedback="(rating) => onFeedback(message, rating)"
-        @confirm-draft="(draft) => onConfirmDraft(index, draft)"
+        @confirm-draft="(draft, draftIndex, done) => onConfirmDraft(index, draft, draftIndex, done)"
       />
     </div>
 
@@ -58,7 +58,15 @@ import { ElMessage } from 'element-plus'
 import MessageBubble from '../components/MessageBubble.vue'
 import { useChatStore } from '../stores/chat'
 import { streamChat } from '../api/sse'
-import { confirmTicket, createReservation, sendFeedback } from '../api/client'
+import {
+  confirmTicket,
+  createLostFound,
+  createRepair,
+  createReservation,
+  resolveLostFound,
+  sendFeedback,
+  transitionReservation,
+} from '../api/client'
 import type { Message, ToolDraft } from '../types'
 
 const store = useChatStore()
@@ -148,27 +156,128 @@ onBeforeUnmount(() => {
   controller?.abort()
 })
 
-async function onConfirmDraft(index: number, draft: ToolDraft) {
-  if (draft.action === 'create_reservation') {
-    if (!draft.location_id || !draft.res_date || !draft.slot) {
-      ElMessage.error('预约草稿缺少位置/日期参数，请重新发起对话')
-      return
-    }
-    try {
-      const result = await createReservation({
-        location_id: draft.location_id,
-        res_date: draft.res_date,
-        slot: draft.slot,
-      })
-      store.setReservationNo(index, result.id)
-      ElMessage.success(`已预约：${result.location_name} ${result.res_date} ${result.slot_label}`)
-    } catch (error: any) {
-      // 409 = 时段被抢，提示换时段
-      ElMessage.error(`预约失败：${error?.message || error}`)
-    }
+async function onConfirmDraft(
+  index: number,
+  draft: ToolDraft,
+  draftIndex: number,
+  done?: () => void,
+) {
+  try {
+    await confirmDraftByAction(index, draft, draftIndex)
+  } finally {
+    // 无论成功失败都要恢复按钮，避免请求失败后一直转圈
+    done?.()
+  }
+}
+
+/** 一个 action 对应一个后端接口，各自独立处理，不做跨业务复用 */
+async function confirmDraftByAction(index: number, draft: ToolDraft, draftIndex: number) {
+  switch (draft.action) {
+    case 'create_lost_found':
+      return confirmLostFound(index, draft, draftIndex)
+    case 'create_repair':
+      return confirmRepair(index, draft, draftIndex)
+    case 'cancel_reservation':
+      return confirmCancelReservation(index, draft, draftIndex)
+    case 'resolve_lost_found':
+      return confirmResolveLostFound(index, draft, draftIndex)
+    case 'create_reservation':
+      return confirmReservation(index, draft)
+    default:
+      return confirmTicketDraft(index, draft)
+  }
+}
+
+async function confirmReservation(index: number, draft: ToolDraft) {
+  if (!draft.location_id || !draft.res_date || !draft.slot) {
+    ElMessage.error('预约草稿缺少位置/日期参数，请重新发起对话')
     return
   }
+  try {
+    const result = await createReservation({
+      location_id: draft.location_id,
+      res_date: draft.res_date,
+      slot: draft.slot,
+    })
+    store.setReservationNo(index, result.id)
+    ElMessage.success(`已预约：${result.location_name} ${result.res_date} ${result.slot_label}`)
+  } catch (error: any) {
+    // 409 = 时段被抢，提示换时段
+    ElMessage.error(`预约失败：${error?.message || error}`)
+  }
+}
 
+async function confirmLostFound(index: number, draft: ToolDraft, draftIndex = 0) {
+  if (!draft.kind || !draft.contact) {
+    ElMessage.error('失物招领草稿缺少类型或联系方式，请重新发起对话')
+    return
+  }
+  try {
+    const result = await createLostFound({
+      kind: draft.kind,
+      title: draft.title,
+      description: draft.description,
+      location: draft.location || '',
+      contact: draft.contact,
+    })
+    store.setDraftResult(index, draftIndex, `已提交审核：#${result.id}`)
+    ElMessage.success(`已提交审核（#${result.id}），管理员通过后在公示栏展示`)
+  } catch (error: any) {
+    ElMessage.error(`发布失败：${error?.message || error}`)
+  }
+}
+
+async function confirmRepair(index: number, draft: ToolDraft, draftIndex = 0) {
+  if (!draft.building || !draft.room || !draft.contact) {
+    ElMessage.error('报修草稿缺少楼栋/房间/联系方式，请重新发起对话')
+    return
+  }
+  try {
+    const result = await createRepair({
+      title: draft.title,
+      description: draft.description,
+      category: draft.repair_category || 'other',
+      building: draft.building,
+      room: draft.room,
+      contact: draft.contact,
+    })
+    store.setDraftResult(index, draftIndex, `已提交报修：#${result.id}`)
+    ElMessage.success(`报修已提交（#${result.id}），状态：待受理`)
+  } catch (error: any) {
+    // 429 限流 / 409 重复，后端已给出中文原因
+    ElMessage.error(`提交失败：${error?.message || error}`)
+  }
+}
+
+async function confirmCancelReservation(index: number, draft: ToolDraft, draftIndex = 0) {
+  if (!draft.reservation_id) {
+    ElMessage.error('取消预约草稿缺少预约编号，请重新发起对话')
+    return
+  }
+  try {
+    await transitionReservation(draft.reservation_id, 'cancel')
+    store.setDraftResult(index, draftIndex, `已取消：#${draft.reservation_id}`)
+    ElMessage.success('预约已取消，该时段已释放')
+  } catch (error: any) {
+    ElMessage.error(`取消失败：${error?.message || error}`)
+  }
+}
+
+async function confirmResolveLostFound(index: number, draft: ToolDraft, draftIndex = 0) {
+  if (!draft.item_id) {
+    ElMessage.error('结案草稿缺少条目编号，请重新发起对话')
+    return
+  }
+  try {
+    await resolveLostFound(draft.item_id)
+    store.setDraftResult(index, draftIndex, `已结案：#${draft.item_id}`)
+    ElMessage.success('已标记为已找回/已归还')
+  } catch (error: any) {
+    ElMessage.error(`结案失败：${error?.message || error}`)
+  }
+}
+
+async function confirmTicketDraft(index: number, draft: ToolDraft) {
   try {
     const result = await confirmTicket({
       title: draft.title,

@@ -125,6 +125,61 @@ def validate_payload(payload: dict[str, Any]) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # 对外接口
 # ---------------------------------------------------------------------------
+def _limit_config(settings: Settings) -> tuple[int, int]:
+    """限流参数（每日上限、判重窗口小时数），提交与预检共用。"""
+    per_day = max(1, int(getattr(settings, "repair_per_user_per_day", 3)))
+    dup_hours = max(0, int(getattr(settings, "repair_duplicate_hours", 24)))
+    return per_day, dup_hours
+
+
+def precheck_limits(settings: Settings, user_id: int, data: dict[str, str]) -> None:
+    """只读预检限流与判重，供 Agent 生成报修草稿时提前拦截。
+
+    与 create_repair 使用同一套规则；预检通过不代表一定能提交成功，
+    正式提交时 create_repair 会在写事务内再校验一次（并发下以提交结果为准）。
+    """
+    now = datetime.now()
+    per_day, dup_hours = _limit_config(settings)
+
+    if not settings.mysql_url:
+        with _mock_lock:
+            _check_limits_mock(user_id, data, now, per_day, dup_hours)
+        return
+
+    from app.db.models import RepairRequest
+    from app.db.session import new_session
+
+    with new_session(settings.mysql_url) as session:
+        recent_count = (
+            session.query(RepairRequest)
+            .filter(
+                RepairRequest.user_id == user_id,
+                RepairRequest.created_at >= now - timedelta(days=1),
+            )
+            .count()
+        )
+        if recent_count >= per_day:
+            raise RepairRuleError(
+                f"今日已提交 {recent_count} 条报修，每日最多 {per_day} 条，请明天再试"
+            )
+        duplicate = (
+            session.query(RepairRequest)
+            .filter(
+                RepairRequest.user_id == user_id,
+                RepairRequest.building == data["building"],
+                RepairRequest.room == data["room"],
+                RepairRequest.category == data["category"],
+                RepairRequest.created_at >= now - timedelta(hours=dup_hours),
+            )
+            .first()
+        )
+        if duplicate is not None:
+            raise RepairRuleError(
+                f"{dup_hours} 小时内已提交过同房间同类型的报修（#{duplicate.id}），"
+                "请等待处理，不要重复提交"
+            )
+
+
 def create_repair(
     settings: Settings,
     user_id: int,
@@ -133,8 +188,7 @@ def create_repair(
     """提交报修。触发限流（429）/重复判定（409）时抛 RepairRuleError。"""
     data = validate_payload(payload)
     now = datetime.now()
-    per_day = max(1, int(getattr(settings, "repair_per_user_per_day", 3)))
-    dup_hours = max(0, int(getattr(settings, "repair_duplicate_hours", 24)))
+    per_day, dup_hours = _limit_config(settings)
 
     if not settings.mysql_url:
         global _mock_seq

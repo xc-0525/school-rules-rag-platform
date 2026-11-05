@@ -105,11 +105,31 @@ CAMPUS_TOOL_NAMES = (
     "query_my_reservations",
     "query_location_availability",
     "query_lost_found",
+    "query_my_lost_found",
     "create_reservation_draft",
+    "create_lost_found_draft",
+    "create_repair_draft",
+    "cancel_reservation_draft",
+    "resolve_lost_found_draft",
 )
 
-# 写操作只生成"待确认草稿"，由前端确认按钮落到 POST /api/v1/reservations
-CAMPUS_DRAFT_TOOL_NAMES = ("create_reservation_draft",)
+# 写操作只生成"待确认草稿"：前端按 action 调对应 POST 接口，模型不直接落库
+CAMPUS_DRAFT_TOOL_NAMES = (
+    "create_reservation_draft",
+    "create_lost_found_draft",
+    "create_repair_draft",
+    "cancel_reservation_draft",
+    "resolve_lost_found_draft",
+)
+
+# 失物招领状态的中文展示（仅用于工具摘要；服务层不返回 label，避免与前端 i18n 耦合）
+LOSTFOUND_STATUS_LABELS = {
+    "pending_review": "待审核",
+    "published": "已公示",
+    "rejected": "未通过",
+    "resolved": "已解决",
+    "removed": "已下架",
+}
 
 SLOT_ALIASES = {
     "上午": "morning",
@@ -196,7 +216,7 @@ CAMPUS_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "description": (
                 "检索失物招领公示栏（只读，仅返回已审核发布的信息）。"
                 "适用于“有人捡到校园卡吗”“最近有没有人捡到钥匙”。"
-                "不能发布、修改或认领，发布失物请引导用户到失物招领页面。"
+                "要发布寻物/招领请改用 create_lost_found_draft。"
             ),
             "parameters": {
                 "type": "object",
@@ -235,6 +255,143 @@ CAMPUS_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["location", "slot"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_lost_found_draft",
+            "description": (
+                "为当前用户生成失物招领发布草稿（不会直接发布，必须由用户点“确认发布”）。"
+                "适用于“我昨天在XX丢了一个学生证，帮我发布失物招领”“我捡到一把钥匙，帮我发个招领”。"
+                "kind=lost 表示我丢了东西（寻物），kind=found 表示我捡到东西（招领）。"
+                "发布后进入管理员审核（pending_review），审核通过才在公示栏展示。"
+                "即使联系方式等信息不全也要先调用本工具：工具会返回缺哪些字段再追问，"
+                "严禁自己编造手机号/微信号等参数。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["lost", "found"],
+                        "description": "lost=我丢了东西，found=我捡到东西",
+                    },
+                    "title": {"type": "string", "description": "标题，物品名+简短特征，如 学生证/黑色雨伞"},
+                    "description": {
+                        "type": "string",
+                        "description": "详细描述：丢失或拾获的时间、经过、物品特征，至少 10 个字",
+                    },
+                    "location": {"type": "string", "description": "丢失或拾获地点，如 桂园三楼/图书馆三楼"},
+                    "contact": {
+                        "type": "string",
+                        "description": "联系方式（手机/微信/QQ）；用户没提供就留空，不要编造",
+                    },
+                },
+                "required": ["kind", "title", "description", "location"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_my_lost_found",
+            "description": (
+                "查询当前用户自己发布的失物招领（含待审核、已发布、被驳回及驳回理由）。"
+                "适用于“我发的失物招领审核通过了吗”“我发布过哪些招领”。只读。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["", "pending_review", "published", "rejected", "resolved"],
+                        "description": "可选，按状态过滤；留空返回全部",
+                    },
+                    "limit": {"type": "integer", "description": "返回条数，1-10，默认 5"},
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_repair_draft",
+            "description": (
+                "为当前用户生成寝室报修申请草稿（不会直接提交，必须由用户点“确认提交报修”）。"
+                "适用于“宿舍水龙头坏了帮我报修”“12栋305空调不制冷，报个修”。"
+                "楼栋、房间号、联系方式必填，缺失时先追问；"
+                "即使信息不全也要先调用本工具，由工具返回缺哪些字段再追问；"
+                "提交后进入待受理（pending），每日上限与同房间同类型判重会在提交时校验。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "故障标题，如 卫生间水龙头漏水"},
+                    "description": {"type": "string", "description": "故障描述，至少 5 个字"},
+                    "category": {
+                        "type": "string",
+                        "enum": ["water_power", "network", "furniture", "door_window", "other"],
+                        "description": "分类：水电/网络/家具/门窗/其他",
+                    },
+                    "building": {"type": "string", "description": "楼栋，如 12栋"},
+                    "room": {"type": "string", "description": "房间号，如 305"},
+                    "contact": {
+                        "type": "string",
+                        "description": "联系方式；用户没提供就留空，不要编造",
+                    },
+                },
+                "required": ["title", "description", "category", "building", "room"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_reservation_draft",
+            "description": (
+                "为当前用户生成“取消预约”确认草稿（不会直接取消，必须由用户点“确认取消”）。"
+                "适用于“帮我把明天下午的研讨间退了”“取消我最近的预约”。"
+                "可先用 query_my_reservations 查到具体预约；有多条时需指定日期或时段。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reservation_id": {"type": "integer", "description": "预约编号（已知时直接传）"},
+                    "date": {"type": "string", "description": "预约日期 YYYY-MM-DD，用于定位"},
+                    "slot": {
+                        "type": "string",
+                        "enum": ["morning", "afternoon", "evening"],
+                        "description": "时段，用于定位",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_lost_found_draft",
+            "description": (
+                "为当前用户生成“标记已找回/已归还”的确认草稿（不会直接改状态，需用户确认）。"
+                "适用于“我丢的校园卡找到了，帮我关掉那条寻物启事”。"
+                "只能操作本人发布且已发布的条目；可先用 query_my_lost_found 查到编号。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item_id": {"type": "integer", "description": "条目编号（已知时直接传）"},
+                    "keyword": {"type": "string", "description": "标题关键词，用于定位条目"},
+                },
+                "required": [],
                 "additionalProperties": False,
             },
         },
@@ -307,8 +464,18 @@ class ToolRunner:
                 result = await self._query_location_availability(arguments)
             elif name == "query_lost_found":
                 result = await self._query_lost_found(arguments, user_id)
+            elif name == "query_my_lost_found":
+                result = await self._query_my_lost_found(arguments, user_id)
             elif name == "create_reservation_draft":
                 result = await self._create_reservation_draft(arguments, user_id)
+            elif name == "create_lost_found_draft":
+                result = await self._create_lost_found_draft(arguments, user_id)
+            elif name == "create_repair_draft":
+                result = await self._create_repair_draft(arguments, user_id)
+            elif name == "cancel_reservation_draft":
+                result = await self._cancel_reservation_draft(arguments, user_id)
+            elif name == "resolve_lost_found_draft":
+                result = await self._resolve_lost_found_draft(arguments, user_id)
             else:
                 result = ToolResult(
                     name=name,
@@ -930,6 +1097,391 @@ class ToolRunner:
                 "slot": slot,
                 "slot_label": slot_label,
             },
+        )
+
+    # ------------------------------------------------------ 失物招领（发布 / 我的）
+    async def _create_lost_found_draft(
+        self, arguments: dict[str, Any], user_id: int
+    ) -> ToolResult:
+        """生成失物招领发布草稿：只做校验与组装，不写库。
+
+        写入由用户在聊天里点“确认发布”，前端调 POST /api/v1/lost-found；
+        提交后状态为 pending_review，需管理员审批才公示。
+        """
+        from app.services import lostfound as lostfound_service
+
+        payload = {
+            "kind": arguments.get("kind"),
+            "title": arguments.get("title"),
+            "description": arguments.get("description"),
+            "location": arguments.get("location"),
+            "contact": arguments.get("contact"),
+        }
+        try:
+            data = lostfound_service.validate_payload(self.settings, payload)
+        except lostfound_service.LostFoundRuleError as exc:
+            return self._draft_error(
+                "create_lost_found_draft", arguments, f"还不能发布：{exc}。补充后我再生成草稿。"
+            )
+
+        kind_label = lostfound_service.LOSTFOUND_KINDS[data["kind"]]
+        summary = (
+            f"已生成失物招领发布草稿（尚未提交）：\n"
+            f"类型：{kind_label}\n"
+            f"标题：{data['title']}\n"
+            f"地点：{data['location'] or '未填写'}\n"
+            f"联系方式：{data['contact']}\n"
+            "请点击下方“确认发布”提交；提交后进入管理员审核，审核通过才在公示栏展示。"
+        )
+        return ToolResult(
+            name="create_lost_found_draft",
+            arguments={**payload, "kind": data["kind"]},
+            success=True,
+            summary=summary,
+            sources=[
+                SourceItem(
+                    type="tool",
+                    title=f"{kind_label}草稿：{data['title']}",
+                    detail=data["location"] or "待补充地点",
+                    snippet="待确认，未提交审核",
+                )
+            ],
+            payload={
+                "requires_confirmation": True,
+                "action": "create_lost_found",
+                "title": data["title"],
+                "description": data["description"],
+                "category": kind_label,
+                "kind": data["kind"],
+                "location": data["location"],
+                "contact": data["contact"],
+            },
+        )
+
+    async def _query_my_lost_found(
+        self, arguments: dict[str, Any], user_id: int
+    ) -> ToolResult:
+        """查询本人发布的失物招领（含审核状态与驳回理由），只读。"""
+        from app.services import lostfound as lostfound_service
+
+        limit = max(1, min(int(arguments.get("limit") or 5), 10))
+        status_filter = str(arguments.get("status") or "").strip().lower()
+        try:
+            rows = await asyncio.to_thread(
+                lambda: lostfound_service.list_items(
+                    self.settings,
+                    user_id=user_id,
+                    is_admin=False,
+                    scope="mine",
+                    limit=30,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("query_my_lost_found failed")
+            return ToolResult(
+                name="query_my_lost_found",
+                arguments=arguments,
+                success=False,
+                summary=f"查询我的失物招领失败：{exc}",
+            )
+        if status_filter:
+            rows = [row for row in rows if row.get("status") == status_filter]
+        rows = rows[:limit]
+
+        if not rows:
+            return ToolResult(
+                name="query_my_lost_found",
+                arguments=arguments,
+                success=True,
+                summary="你还没有发布过失物招领（或没有该状态下的记录）。"
+                "如需发布，告诉我丢了/捡到了什么、在哪里、联系方式。",
+                payload={"items": []},
+            )
+        lines = []
+        for row in rows:
+            line = (
+                f"#{row.get('id')}｜{row.get('kind_label', '')}｜{row.get('title', '')}"
+                f"｜{LOSTFOUND_STATUS_LABELS.get(row.get('status', ''), row.get('status', ''))}"
+                f"｜{row.get('created_at') or ''}"
+            )
+            if row.get("status") == "rejected" and row.get("review_remark"):
+                line += f"｜驳回理由：{row['review_remark']}"
+            lines.append(line)
+        return ToolResult(
+            name="query_my_lost_found",
+            arguments=arguments,
+            success=True,
+            summary="我发布的失物招领：\n" + "\n".join(lines),
+            sources=[
+                SourceItem(
+                    type="tool",
+                    title=row.get("title", "失物信息"),
+                    detail=LOSTFOUND_STATUS_LABELS.get(row.get("status", ""), ""),
+                    snippet=(row.get("description") or "")[:200],
+                )
+                for row in rows
+            ],
+            payload={"items": rows},
+        )
+
+    # ------------------------------------------------------------ 寝室报修（提交）
+    async def _create_repair_draft(
+        self, arguments: dict[str, Any], user_id: int
+    ) -> ToolResult:
+        """生成报修申请草稿：复用服务层校验与限流预检，不写库。"""
+        from app.services import repairs as repair_service
+
+        try:
+            data = repair_service.validate_payload(
+                {
+                    "title": arguments.get("title"),
+                    "description": arguments.get("description"),
+                    "category": arguments.get("category"),
+                    "building": arguments.get("building"),
+                    "room": arguments.get("room"),
+                    "contact": arguments.get("contact"),
+                }
+            )
+        except repair_service.RepairRuleError as exc:
+            return self._draft_error(
+                "create_repair_draft", arguments, f"还不能提交报修：{exc}。补充后我再生成草稿。"
+            )
+
+        # 限流与判重预检：避免用户点了“确认提交”才被 429/409 拒绝
+        try:
+            await asyncio.to_thread(
+                lambda: repair_service.precheck_limits(self.settings, user_id, data)
+            )
+        except repair_service.RepairRuleError as exc:
+            return self._draft_error("create_repair_draft", arguments, str(exc))
+        except Exception as exc:  # noqa: BLE001 —— 预检失败不阻断，交给提交接口兜底
+            logger.exception("create_repair_draft precheck failed")
+            logger.debug("precheck skipped: %s", exc)
+
+        category_label = repair_service.category_label(data["category"])
+        summary = (
+            "已生成报修申请草稿（尚未提交）：\n"
+            f"故障：{data['title']}（{category_label}）\n"
+            f"位置：{data['building']} {data['room']}\n"
+            f"联系方式：{data['contact']}\n"
+            "请点击下方“确认提交报修”提交；提交后状态为待受理。"
+        )
+        return ToolResult(
+            name="create_repair_draft",
+            arguments={**data},
+            success=True,
+            summary=summary,
+            sources=[
+                SourceItem(
+                    type="tool",
+                    title=f"报修草稿：{data['title']}",
+                    detail=f"{data['building']} {data['room']}",
+                    snippet="待确认，未提交",
+                )
+            ],
+            payload={
+                "requires_confirmation": True,
+                "action": "create_repair",
+                "title": data["title"],
+                "description": data["description"],
+                "category": category_label,
+                "repair_category": data["category"],
+                "building": data["building"],
+                "room": data["room"],
+                "contact": data["contact"],
+            },
+        )
+
+    # ------------------------------------------------------- 预约（取消 / 失物结案）
+    async def _cancel_reservation_draft(
+        self, arguments: dict[str, Any], user_id: int
+    ) -> ToolResult:
+        """生成取消预约草稿：定位到具体预约并校验归属，取消动作由用户确认。"""
+        from app.services import reservations as reservation_service
+
+        try:
+            active = await asyncio.to_thread(
+                lambda: reservation_service.list_reservations(
+                    self.settings, user_id=user_id, is_admin=False, status="reserved", limit=20
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("cancel_reservation_draft list failed")
+            return self._draft_error(
+                "cancel_reservation_draft", arguments, f"暂时无法查询你的预约：{exc}"
+            )
+        if not active:
+            return self._draft_error(
+                "cancel_reservation_draft", arguments, "你当前没有可取消的有效预约。"
+            )
+
+        target: dict[str, Any] | None = None
+        want_id = arguments.get("reservation_id")
+        if want_id not in (None, ""):
+            try:
+                want_id_int = int(want_id)
+            except (TypeError, ValueError):
+                return self._draft_error(
+                    "cancel_reservation_draft", arguments, "预约编号应为数字。"
+                )
+            target = next((row for row in active if int(row["id"]) == want_id_int), None)
+            if target is None:
+                return self._draft_error(
+                    "cancel_reservation_draft",
+                    arguments,
+                    f"你的有效预约里没有 #{want_id_int}，可取消的有：{self._reservation_brief(active)}",
+                )
+        else:
+            res_date = str(arguments.get("date") or "").strip()
+            slot_raw = str(arguments.get("slot") or "").strip()
+            slot = SLOT_ALIASES.get(slot_raw.lower(), SLOT_ALIASES.get(slot_raw, ""))
+            candidates = [
+                row
+                for row in active
+                if (not res_date or row.get("res_date") == res_date)
+                and (not slot or row.get("slot") == slot)
+            ]
+            if len(candidates) == 1:
+                target = candidates[0]
+            elif not candidates:
+                return self._draft_error(
+                    "cancel_reservation_draft",
+                    arguments,
+                    f"没找到符合条件的预约，可取消的有：{self._reservation_brief(active)}",
+                )
+            else:
+                return self._draft_error(
+                    "cancel_reservation_draft",
+                    arguments,
+                    f"符合条件的预约不止一条，请指定日期或时段：{self._reservation_brief(candidates)}",
+                )
+
+        desc = f"{target.get('res_date', '')} {target.get('slot_label', '')}".strip()
+        return ToolResult(
+            name="cancel_reservation_draft",
+            arguments={"reservation_id": int(target["id"])},
+            success=True,
+            summary=(
+                f"已生成取消预约确认：\n位置：{target.get('location_name', '')}\n时间：{desc}\n"
+                "请点击下方“确认取消”完成；取消后该时段会释放给其他同学。"
+            ),
+            sources=[
+                SourceItem(
+                    type="tool",
+                    title=f"取消预约：{target.get('location_name', '')}",
+                    detail=desc,
+                    snippet="待确认，尚未取消",
+                )
+            ],
+            payload={
+                "requires_confirmation": True,
+                "action": "cancel_reservation",
+                "title": target.get("location_name", ""),
+                "description": desc,
+                "category": "图书馆预约",
+                "reservation_id": int(target["id"]),
+            },
+        )
+
+    async def _resolve_lost_found_draft(
+        self, arguments: dict[str, Any], user_id: int
+    ) -> ToolResult:
+        """生成“标记已找回/已归还”草稿：只允许操作本人已发布的条目。"""
+        from app.services import lostfound as lostfound_service
+
+        try:
+            mine = await asyncio.to_thread(
+                lambda: lostfound_service.list_items(
+                    self.settings, user_id=user_id, is_admin=False, scope="mine", limit=50
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("resolve_lost_found_draft list failed")
+            return self._draft_error(
+                "resolve_lost_found_draft", arguments, f"暂时无法查询你的发布：{exc}"
+            )
+
+        candidates = [row for row in mine if row.get("status") == "published"]
+        if not candidates:
+            return self._draft_error(
+                "resolve_lost_found_draft",
+                arguments,
+                "你当前没有“已发布”的失物招领可结案（待审核的条目需先通过审核）。",
+            )
+
+        target: dict[str, Any] | None = None
+        want_id = arguments.get("item_id")
+        if want_id not in (None, ""):
+            try:
+                want_id_int = int(want_id)
+            except (TypeError, ValueError):
+                return self._draft_error(
+                    "resolve_lost_found_draft", arguments, "条目编号应为数字。"
+                )
+            target = next((row for row in candidates if int(row["id"]) == want_id_int), None)
+            if target is None:
+                return self._draft_error(
+                    "resolve_lost_found_draft",
+                    arguments,
+                    f"你没有已发布且编号为 #{want_id_int} 的条目，可结案的有："
+                    + self._lostfound_brief(candidates),
+                )
+        else:
+            keyword = str(arguments.get("keyword") or "").strip()
+            matched = [row for row in candidates if not keyword or keyword in str(row.get("title", ""))]
+            if len(matched) == 1:
+                target = matched[0]
+            elif not matched:
+                return self._draft_error(
+                    "resolve_lost_found_draft",
+                    arguments,
+                    "没找到匹配的已发布条目，可结案的有：" + self._lostfound_brief(candidates),
+                )
+            else:
+                return self._draft_error(
+                    "resolve_lost_found_draft",
+                    arguments,
+                    "匹配到多条，请指定编号：" + self._lostfound_brief(matched),
+                )
+
+        return ToolResult(
+            name="resolve_lost_found_draft",
+            arguments={"item_id": int(target["id"])},
+            success=True,
+            summary=(
+                f"已生成结案确认：\n条目：#{target['id']} {target.get('title', '')}"
+                f"（{target.get('kind_label', '')}）\n"
+                "请点击下方“确认已找回/已归还”把状态改为已解决；结案后不再出现在公示栏。"
+            ),
+            sources=[
+                SourceItem(
+                    type="tool",
+                    title=f"结案草稿：{target.get('title', '')}",
+                    detail=target.get("kind_label", ""),
+                    snippet="待确认，尚未结案",
+                )
+            ],
+            payload={
+                "requires_confirmation": True,
+                "action": "resolve_lost_found",
+                "title": target.get("title", ""),
+                "description": target.get("description", "")[:200],
+                "category": target.get("kind_label", ""),
+                "item_id": int(target["id"]),
+            },
+        )
+
+    @staticmethod
+    def _reservation_brief(rows: list[dict[str, Any]]) -> str:
+        return "；".join(
+            f"#{row['id']} {row.get('location_name', '')} {row.get('res_date', '')} {row.get('slot_label', '')}"
+            for row in rows
+        )
+
+    @staticmethod
+    def _lostfound_brief(rows: list[dict[str, Any]]) -> str:
+        return "；".join(
+            f"#{row['id']} {row.get('title', '')}（{row.get('kind_label', '')}）" for row in rows
         )
 
     def _draft_error(

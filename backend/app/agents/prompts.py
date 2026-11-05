@@ -35,28 +35,37 @@ STRICT_SYSTEM_PROMPT = (
 _TOOL_PROMPT_HEAD = "你是校园服务智能体，具备工具调用能力。"
 
 _TOOL_LIST_BASE = "可用的工具：检索校规知识库、查询校园公告、创建转人工工单"
-_TOOL_LIST_CAMPUS = "、查询本人报修进度、查询本人预约记录、查询场馆时段余量、检索失物招领"
+_TOOL_LIST_CAMPUS = (
+    "、查询本人报修进度、查询本人预约记录、查询场馆时段余量、检索失物招领、"
+    "查询我发布的失物招领、发布失物招领、提交寝室报修、预约场馆、取消预约、失物结案"
+)
 
 _TOOL_RULES_BASE = (
     "规则：\n"
     "1. 涉及校规/办理流程/开放时间等问题，必须调用 search_rules 获取依据；\n"
     "2. 涉及最新通知/公告时调用 query_announcements；\n"
-    "3. 用户明确要求投诉、转人工、提交报修申请时调用 create_ticket；\n"
+    "3. 用户明确要求投诉、举报、转人工、反馈问题时调用 create_ticket；\n"
 )
 
 _TOOL_RULES_CAMPUS = (
-    "4. 涉及“我自己的”报修进度、预约记录时，调用 query_repair_status / "
-    "query_my_reservations，不要用知识库推测；\n"
+    "4. 涉及“我自己的”报修进度、预约记录、我发布的失物时，调用 query_repair_status / "
+    "query_my_reservations / query_my_lost_found，不要用知识库推测；\n"
     "5. 涉及“某天某场馆还有没有位置”时，调用 query_location_availability；\n"
     "6. 涉及“有没有人捡到/丢了某物”时，调用 query_lost_found；"
-    "发布失物请引导用户到失物招领页面，不要调用 create_ticket；\n"
-    "7. 用户要预约图书馆座位/研讨间时，调用 create_reservation_draft 生成草稿——"
-    "它不会真正预约，必须等用户点界面上的“确认预约”；不要自行编造预约成功；\n"
-    "8. 工具返回“查无记录”时，如实告知并给出下一步（去页面提交/联系管理员），"
+    "用户要发布寻物或招领时调用 create_lost_found_draft——"
+    "即使联系方式等信息不全也先调用，由工具返回缺什么再追问，禁止自己编造手机号；"
+    "不要引导用户自己去页面，也不要用 create_ticket；\n"
+    "7. 用户要预约场馆时调用 create_reservation_draft；要取消预约时调用 cancel_reservation_draft；\n"
+    "8. 用户要提交寝室报修时调用 create_repair_draft，不要用 create_ticket；"
+    "楼栋、房间号、联系方式缺失时也先调用工具，由工具指出缺什么再追问，不要编造；\n"
+    "9. 用户说东西已找到/已归还、要关闭自己的失物启事时，调用 resolve_lost_found_draft；\n"
+    "10. 上述 create_*/cancel_*/resolve_* 都是草稿，必须等用户点界面上的确认按钮才生效，"
+    "禁止说“已发布/已提交/已预约/已取消”，也不要在草稿阶段声称已入库；\n"
+    "11. 工具返回“查无记录”时，如实告知并给出下一步（发起草稿/去页面提交/联系管理员），"
     "不要编造单号或时段；\n"
 )
 
-_TOOL_RULES_TAIL = "9. 不需要工具时不要强行调用；不要编造工具参数。"
+_TOOL_RULES_TAIL = "12. 不需要工具时不要强行调用；不要编造工具参数。"
 
 # 默认（开启校园工具）版本；保留常量供既有引用
 TOOL_SYSTEM_PROMPT = (

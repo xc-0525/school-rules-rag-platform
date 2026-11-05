@@ -124,15 +124,14 @@ def sanitize_image_urls(urls: Any, max_images: int) -> list[str]:
 # ---------------------------------------------------------------------------
 # 对外接口
 # ---------------------------------------------------------------------------
-def create_item(
-    settings: Settings,
-    user_id: int,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    """提交发布申请 → pending_review，等待管理员审批。"""
+def validate_payload(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    """清洗并校验发布参数；非法输入抛 LostFoundRuleError。
+
+    草稿预检与正式提交共用本函数，保证两处口径一致。
+    """
+    kind = str(payload.get("kind") or "").strip().lower()
     title = str(payload.get("title") or "").strip()[:200]
     description = str(payload.get("description") or "").strip()[:4000]
-    kind = str(payload.get("kind") or "").strip().lower()
     location = str(payload.get("location") or "").strip()[:200]
     contact = str(payload.get("contact") or "").strip()[:100]
     max_images = max(0, int(getattr(settings, "lostfound_max_images", 3)))
@@ -145,7 +144,30 @@ def create_item(
         raise LostFoundRuleError("描述至少 10 个字，帮助管理员判断信息真实性")
     if not contact:
         raise LostFoundRuleError("联系方式不能为空")
-    images = sanitize_image_urls(payload.get("image_urls"), max_images)
+
+    return {
+        "kind": kind,
+        "title": title,
+        "description": description,
+        "location": location,
+        "contact": contact,
+        "images": sanitize_image_urls(payload.get("image_urls"), max_images),
+    }
+
+
+def create_item(
+    settings: Settings,
+    user_id: int,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """提交发布申请 → pending_review，等待管理员审批。"""
+    data = validate_payload(settings, payload)
+    kind = data["kind"]
+    title = data["title"]
+    description = data["description"]
+    location = data["location"]
+    contact = data["contact"]
+    images = data["images"]
 
     if not settings.mysql_url:
         global _mock_seq

@@ -209,6 +209,142 @@ class CampusToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(full.success)
         self.assertIn("最多同时保留", full.summary)
 
+    # ------------------------------------------------ 失物招领发布（草稿 → 确认）
+    async def test_lost_found_draft_is_not_written(self) -> None:
+        result = await self._run(
+            "create_lost_found_draft",
+            {
+                "kind": "lost",
+                "title": "学生证",
+                "description": "昨天在桂园三楼丢失学生证一张，姓名徐某某，有捡到的同学请联系我。",
+                "location": "桂园三楼",
+                "contact": "13800000000",
+            },
+        )
+        self.assertTrue(result.success)
+        self.assertEqual(result.payload["action"], "create_lost_found")
+        self.assertTrue(result.payload["requires_confirmation"])
+        self.assertEqual(result.payload["kind"], "lost")
+        # 草稿阶段不落库，避免"没确认就占用了公示栏"
+        self.assertEqual(lf_service.list_items(self.settings, user_id=1, is_admin=False, scope="mine"), [])
+
+    async def test_lost_found_draft_requires_contact_and_description(self) -> None:
+        no_contact = await self._run(
+            "create_lost_found_draft",
+            {
+                "kind": "lost",
+                "title": "学生证",
+                "description": "昨天在桂园三楼丢失学生证一张，有捡到的同学请联系我。",
+                "location": "桂园三楼",
+                "contact": "",
+            },
+        )
+        self.assertFalse(no_contact.success)
+        self.assertIn("联系方式", no_contact.summary)
+
+        short = await self._run(
+            "create_lost_found_draft",
+            {
+                "kind": "lost",
+                "title": "学生证",
+                "description": "丢了",
+                "location": "桂园三楼",
+                "contact": "13800000000",
+            },
+        )
+        self.assertFalse(short.success)
+        self.assertIn("描述", short.summary)
+
+        bad_kind = await self._run(
+            "create_lost_found_draft",
+            {**_lost_payload(), "kind": "unknown"},
+        )
+        self.assertFalse(bad_kind.success)
+
+    async def test_my_lost_found_shows_review_status(self) -> None:
+        item = lf_service.create_item(self.settings, 1, _lost_payload())
+        mine = await self._run("query_my_lost_found", {}, user_id=1)
+        self.assertTrue(mine.success)
+        self.assertIn("待审核", mine.summary)
+        self.assertIn(f"#{item['id']}", mine.summary)
+
+        # 审批通过后状态变化
+        lf_service.review_item(self.settings, item["id"], 9, action="approve")
+        after = await self._run("query_my_lost_found", {}, user_id=1)
+        self.assertIn("已公示", after.summary)
+
+        # 按用户隔离
+        other = await self._run("query_my_lost_found", {}, user_id=2)
+        self.assertEqual(other.payload["items"], [])
+
+    # ---------------------------------------------------------- 报修提交（草稿）
+    async def test_repair_draft_is_not_written(self) -> None:
+        result = await self._run("create_repair_draft", _repair_payload())
+        self.assertTrue(result.success)
+        self.assertEqual(result.payload["action"], "create_repair")
+        self.assertEqual(result.payload["building"], "12栋")
+        self.assertEqual(
+            repair_service.list_repairs(self.settings, user_id=1, is_admin=False), []
+        )
+
+    async def test_repair_draft_precheck_blocks_duplicate(self) -> None:
+        repair_service.create_repair(self.settings, 1, _repair_payload())
+        again = await self._run("create_repair_draft", _repair_payload())
+        self.assertFalse(again.success, "同房间同类型 24h 内重复应在草稿阶段就拦住")
+        self.assertIn("已提交过", again.summary)
+
+    async def test_repair_draft_rejects_missing_fields(self) -> None:
+        no_room = await self._run("create_repair_draft", _repair_payload(room=""))
+        self.assertFalse(no_room.success)
+        self.assertIn("楼栋和房间号", no_room.summary)
+
+    # ------------------------------------------------------ 取消预约（草稿）
+    async def test_cancel_reservation_draft_is_not_cancelled(self) -> None:
+        locations = res_service.list_locations(self.settings)
+        created = res_service.create_reservation(
+            self.settings, 1, location_id=locations[0]["id"], res_date=TOMORROW, slot="afternoon"
+        )
+        result = await self._run("cancel_reservation_draft", {}, user_id=1)
+        self.assertTrue(result.success)
+        self.assertEqual(result.payload["action"], "cancel_reservation")
+        self.assertEqual(result.payload["reservation_id"], created["id"])
+        # 未确认前仍是有效预约
+        active = res_service.list_reservations(
+            self.settings, user_id=1, is_admin=False, status="reserved"
+        )
+        self.assertEqual(len(active), 1)
+
+    async def test_cancel_reservation_draft_needs_unique_target(self) -> None:
+        locations = res_service.list_locations(self.settings)
+        for slot in ("morning", "afternoon"):
+            res_service.create_reservation(
+                self.settings, 1, location_id=locations[0]["id"], res_date=TOMORROW, slot=slot
+            )
+        ambiguous = await self._run("cancel_reservation_draft", {}, user_id=1)
+        self.assertFalse(ambiguous.success)
+        self.assertIn("请指定日期或时段", ambiguous.summary)
+
+        picked = await self._run("cancel_reservation_draft", {"slot": "morning"}, user_id=1)
+        self.assertTrue(picked.success)
+        self.assertIn("上午 08:00-12:00", picked.payload["description"])
+
+    # ------------------------------------------------------ 失物结案（草稿）
+    async def test_resolve_lost_found_draft_only_published(self) -> None:
+        pending = lf_service.create_item(self.settings, 1, _lost_payload())
+        blocked = await self._run("resolve_lost_found_draft", {}, user_id=1)
+        self.assertFalse(blocked.success)
+        self.assertIn("待审核", blocked.summary)
+
+        lf_service.review_item(self.settings, pending["id"], 9, action="approve")
+        result = await self._run("resolve_lost_found_draft", {}, user_id=1)
+        self.assertTrue(result.success)
+        self.assertEqual(result.payload["action"], "resolve_lost_found")
+        self.assertEqual(result.payload["item_id"], pending["id"])
+        # 未确认前状态不变
+        self.assertEqual(
+            lf_service.get_item(self.settings, pending["id"], 1, is_admin=False)["status"], "published"
+        )
+
 
     async def test_disabled_tool_not_executed(self) -> None:
         """关闭开关后：下发定义被裁掉，模型即便幻觉出工具名也不执行。"""
@@ -223,7 +359,7 @@ class ToolDefinitionTests(unittest.TestCase):
     def test_ablation_switch(self) -> None:
         settings = make_settings()
         names = [d["function"]["name"] for d in active_tool_definitions(settings)]
-        self.assertEqual(len(names), 8)
+        self.assertEqual(len(names), 13)
         for name in tools_module.CAMPUS_TOOL_NAMES:
             self.assertIn(name, names)
 
