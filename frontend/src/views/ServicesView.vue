@@ -45,7 +45,12 @@
         <div class="reserve-layout">
           <div class="reserve-left">
             <div class="muted" style="margin-bottom: 8px">
-              可预约 {{ tomorrow }} 起未来 7 天的时段；每个时段剩余名额实时显示，约满后不可再约
+              <template v-if="auth.isAdmin">
+                管理员账号不参与座位预约；下方可查看全部预约并代学生取消
+              </template>
+              <template v-else>
+                可预约 {{ tomorrow }} 起未来 7 天的时段；每个时段剩余名额实时显示，约满后不可再约
+              </template>
             </div>
             <div
               v-for="loc in locations"
@@ -76,7 +81,7 @@
                   v-for="s in availability.slots"
                   :key="s.slot"
                   :type="s.booked ? 'info' : 'primary'"
-                  :disabled="s.booked"
+                  :disabled="s.booked || auth.isAdmin"
                   plain
                   @click="book(selectedLocation!, s.slot)"
                 >
@@ -98,6 +103,34 @@
             <el-switch v-model="showExpired" size="small" />
             <span>{{ showExpired ? '收起已过期' : `显示已过期（${expiredCount}）` }}</span>
           </span>
+        </div>
+        <div v-if="auth.isAdmin" class="reserve-filter">
+          <el-select
+            v-model="resFilterUser"
+            clearable
+            filterable
+            placeholder="全部预约人"
+            style="width: 180px"
+          >
+            <el-option
+              v-for="u in resUsers"
+              :key="u.name"
+              :label="`${u.name}（${u.count}）`"
+              :value="u.name"
+            />
+          </el-select>
+          <el-select v-model="resFilterStatus" clearable placeholder="全部状态" style="width: 140px">
+            <el-option label="已预约" value="reserved" />
+            <el-option label="已过期" value="expired" />
+            <el-option label="已取消" value="cancelled" />
+          </el-select>
+          <el-input
+            v-model="resKeyword"
+            clearable
+            placeholder="搜索预约人 / 位置 / 日期"
+            style="width: 240px"
+          />
+          <span class="muted" style="font-size: 12px">共 {{ visibleReservations.length }} 条</span>
         </div>
         <el-table :data="visibleReservations" size="small" stripe>
           <el-table-column v-if="auth.isAdmin" prop="username" label="预约人" width="110">
@@ -487,9 +520,44 @@ const reservations = ref<ReservationItem[]>([])
 /** 默认收起过期记录，避免列表越滚越长；有过期时才显示开关 */
 const showExpired = ref(false)
 const expiredCount = computed(() => reservations.value.filter((r) => r.is_expired).length)
-const visibleReservations = computed(() =>
-  showExpired.value ? reservations.value : reservations.value.filter((r) => !r.is_expired),
-)
+
+/** 管理员筛选：按预约人 / 状态 / 关键词，三者可组合 */
+const resFilterUser = ref('')
+const resFilterStatus = ref('')
+const resKeyword = ref('')
+
+/** 预约人分类：出现过的用户 + 各自条数（下拉里展示） */
+const resUsers = computed(() => {
+  const map = new Map<string, number>()
+  for (const r of reservations.value) {
+    const name = r.username || `#${r.user_id}`
+    map.set(name, (map.get(name) ?? 0) + 1)
+  }
+  return [...map.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+})
+
+const visibleReservations = computed(() => {
+  // 明确筛“已过期”时忽略折叠开关，否则会筛出空列表
+  const includeExpired = showExpired.value || resFilterStatus.value === 'expired'
+  let rows = includeExpired ? reservations.value : reservations.value.filter((r) => !r.is_expired)
+  if (!auth.isAdmin) return rows
+
+  const kw = resKeyword.value.trim().toLowerCase()
+  return rows.filter((r) => {
+    if (resFilterUser.value && (r.username || `#${r.user_id}`) !== resFilterUser.value) return false
+    if (resFilterStatus.value) {
+      const state = r.is_expired ? 'expired' : r.status
+      if (state !== resFilterStatus.value) return false
+    }
+    if (kw) {
+      const hay = `${r.username || ''} ${r.location_name} ${r.res_date} ${r.slot_label}`.toLowerCase()
+      if (!hay.includes(kw)) return false
+    }
+    return true
+  })
+})
 
 const tomorrow = new Date(Date.now() + 86400_000).toISOString().slice(0, 10)
 const tomorrowTs = (() => {
@@ -869,6 +937,14 @@ onMounted(() => {
   /* 独占一行，避免和“添加图片”按钮挤在一起 */
   flex-basis: 100%;
   padding-left: 4px;
+}
+
+.reserve-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
 }
 
 .history-toggle {

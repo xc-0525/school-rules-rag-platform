@@ -973,6 +973,13 @@ class ToolRunner:
     async def _create_reservation_draft(
         self, arguments: dict[str, Any], user_id: int
     ) -> ToolResult:
+        # 管理员不占学生座位：直接拒绝，避免生成无法提交的草稿
+        if await asyncio.to_thread(self._is_admin_user, user_id):
+            return self._draft_error(
+                "create_reservation_draft",
+                arguments,
+                "当前是管理员账号，管理员不参与座位预约；如需替学生处理，可用“代取消”。",
+            )
         """生成预约草稿：只校验 + 组装 payload，不写库。
 
         真正的写入由用户在聊天里点“确认预约”，前端调 POST /api/v1/reservations；
@@ -1485,6 +1492,21 @@ class ToolRunner:
                 "item_id": int(target["id"]),
             },
         )
+
+    def _is_admin_user(self, user_id: int) -> bool:
+        """查一次角色（仅草稿预检用；无库环境视为学生）。"""
+        if not getattr(self.settings, "mysql_url", ""):
+            return False
+        try:
+            from app.db.models import User
+            from app.db.session import new_session
+
+            with new_session(self.settings.mysql_url) as session:
+                row = session.get(User, user_id)
+                return bool(row and row.role == "admin")
+        except Exception:  # noqa: BLE001 —— 查询失败不阻断，交给提交接口兜底
+            logger.exception("check admin role failed")
+            return False
 
     @staticmethod
     def _reservation_brief(rows: list[dict[str, Any]]) -> str:

@@ -64,6 +64,11 @@ def build_router(settings: Settings) -> APIRouter:
         "", response_model=ReservationItem, status_code=201, summary="创建预约（并发安全）"
     )
     async def create_api(payload: ReservationCreate, user: AuthUser = Depends(current_user)):
+        # 管理员不占学生座位：账号只用于管理与代取消
+        if user.is_admin:
+            raise HTTPException(
+                status_code=403, detail="管理员账号不参与座位预约，仅可用于管理与代学生取消"
+            )
         try:
             return await asyncio.to_thread(
                 reservation_service.create_reservation,

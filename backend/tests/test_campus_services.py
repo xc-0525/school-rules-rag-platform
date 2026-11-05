@@ -447,6 +447,20 @@ class CampusApiTests(unittest.TestCase):
         services.llm = FakeLLM()
         return TestClient(create_app(settings, services=services)), settings
 
+    def test_admin_cannot_create_reservation(self) -> None:
+        """管理员账号只做管理，不参与座位预约（403），学生不受影响。"""
+        client, _ = self._client()
+        admin = {"Authorization": f"Bearer {token_for(1, 'admin', 'admin')}"}
+        student = {"Authorization": f"Bearer {token_for(2, 'student', 'student')}"}
+        payload = {"location_id": 1, "res_date": TOMORROW, "slot": "morning"}
+
+        blocked = client.post("/api/v1/reservations", json=payload, headers=admin)
+        self.assertEqual(blocked.status_code, 403, blocked.text)
+        self.assertIn("管理员账号不参与", blocked.json()["detail"])
+
+        ok = client.post("/api/v1/reservations", json=payload, headers=student)
+        self.assertEqual(ok.status_code, 201, ok.text)
+
     def test_repairs_api_mapping(self) -> None:
         client, _ = self._client()
         student = {"Authorization": f"Bearer {token_for(2, 'student', 'student')}"}
