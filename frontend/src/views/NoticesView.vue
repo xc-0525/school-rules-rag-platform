@@ -196,10 +196,12 @@ async function scrollToFocus() {
 }
 
 function restoreDismissed() {
-  hiddenCount.value = clearDismissedNotices()
+  const cleared = clearDismissedNotices()
+  // 清空后“已隐藏”计数必须归零，否则按钮会一直留在页面上（且第二次点击无意义）
+  hiddenCount.value = 0
   // 通知顶部横幅组件重新读取关闭记录
   window.dispatchEvent(new CustomEvent('notice-banner:restore'))
-  ElMessage.success('已恢复显示紧急提示')
+  ElMessage.success(cleared ? `已恢复显示 ${cleared} 条紧急提示` : '已恢复显示紧急提示')
 }
 
 async function loadCategories() {

@@ -82,6 +82,24 @@ def _is_followup(query: str) -> bool:
     query = query.strip()
     return bool(FOLLOWUP_RE.search(query)) or len(query) <= 6
 
+def _compose_retrieval(rewritten: str, history: list[dict[str, str]]) -> str:
+    """追问的检索串：改写结果 + 上一轮问题。
+
+    改写偶尔会丢实体（"那我想知道晋升通道" → "晋升通道是什么"），只带通用词会让
+    向量检索漂到无关条款（实测：公司文档被校规顶掉）。拼接只影响检索，
+    生成侧仍只用改写结果，避免回答被上一轮问句带偏。
+    """
+    last_user = next(
+        (str(m.get("content") or "") for m in reversed(history) if m.get("role") == "user"), ""
+    )
+    last_user = last_user.strip()
+    # 一律拼上一轮问题：判断“实体是否丢失”需要实体识别，二字重合会被"什么/是"等虚词误判，
+    # 反而漏掉真正丢实体的情况。拼接只进检索，召回优先。
+    if last_user and last_user not in rewritten and len(last_user) <= 80:
+        return f"{rewritten} {last_user}".strip()
+    return rewritten
+
+
 async def memory_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     """加载最近历史；对指代型追问先改写为独立 query 再进入检索。"""
     history: list[dict[str, str]] = []
@@ -101,8 +119,13 @@ async def memory_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
             rewritten = await ctx.services.llm.rewrite_query(history, state.query)
         except Exception:  # noqa: BLE001
             logger.exception("追问改写失败，使用原始 query")
-    # 改写结果同时作为生成与检索的起点；扩展只允许改 retrieval_query
-    return {"history": history, "generation_query": rewritten, "retrieval_query": rewritten}
+
+    # 生成侧只用改写结果；检索侧额外拼上一轮问题（见 _compose_retrieval）
+    return {
+        "history": history,
+        "generation_query": rewritten,
+        "retrieval_query": _compose_retrieval(rewritten, history),
+    }
 
 async def retrieve_vector(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     hits = await ctx.services.vector.search(_search_text(state), top_k=3)

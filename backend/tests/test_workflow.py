@@ -467,3 +467,25 @@ class AuthTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class FollowupRetrievalTests(unittest.TestCase):
+    """追问检索串：改写丢实体时用上一轮问题兜底（不影响生成侧）。"""
+
+    def test_rewrite_missing_entity_is_backfilled(self) -> None:
+        history = [
+            {"role": "user", "content": "易蓝招聘是什么样子的"},
+            {"role": "assistant", "content": "抱歉，未找到相关校规或校园服务信息。"},
+        ]
+        retrieval = nodes._compose_retrieval("晋升通道是什么？", history)
+        self.assertIn("易蓝", retrieval)
+        self.assertIn("晋升通道", retrieval)
+
+    def test_rewrite_with_history_keeps_both(self) -> None:
+        history = [{"role": "user", "content": "易蓝招聘是什么样子的"}]
+        retrieval = nodes._compose_retrieval("易蓝的晋升通道是什么？", history)
+        self.assertIn("晋升通道", retrieval)
+        self.assertIn("易蓝", retrieval)
+
+    def test_empty_history_no_change(self) -> None:
+        self.assertEqual(nodes._compose_retrieval("宿舍几点熄灯", []), "宿舍几点熄灯")
