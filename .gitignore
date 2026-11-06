@@ -246,3 +246,6 @@ certbot/
 答辩PPT/
 output/
 docs/开题-*.md
+
+# 报告书根目录副本（与 output/ 内正式版同源），不入库
+课程设计实验报告书（人机交互软件工程）.docx
