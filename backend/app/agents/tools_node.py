@@ -12,7 +12,7 @@ import uuid
 from typing import Any
 
 from app.agents.prompting import _history_messages, _prompt_question
-from app.agents.prompts import SYSTEM_PROMPT, tool_system_prompt
+from app.agents.prompts import SYSTEM_PROMPT, current_date_line, tool_system_prompt
 from app.agents.fusion import _evidence_key
 from app.agents.runtime import NodeContext
 from app.agents.state import AgentState
@@ -27,7 +27,7 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     runner = ToolRunner(ctx.services, ctx.settings)
 
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": tool_system_prompt(ctx.settings)}
+        {"role": "system", "content": tool_system_prompt(ctx.settings) + "\n" + current_date_line()}
     ]
     messages.extend(_history_messages(state, limit=6))
     messages.append({"role": "user", "content": _prompt_question(state)})
@@ -181,7 +181,9 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
         {
             "role": "system",
             "content": (
-                SYSTEM_PROMPT
+                current_date_line()
+                + "\n\n"
+                + SYSTEM_PROMPT
                 + "\n5. 本轮已真实调用业务工具，请依据【工具结果】回答，不要编造工具没有返回的信息。\n"
                 "6. 若工具结果是场馆余量：列出可预约的时段，并提示“告诉我要约的位置和时段，"
                 "我可以生成预约草稿，确认后才会占用”——本系统支持预约（本规则优先于第 2 条），"

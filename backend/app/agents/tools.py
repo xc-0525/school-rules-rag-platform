@@ -202,7 +202,7 @@ CAMPUS_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "location": {"type": "string", "description": "位置名称关键词，如 图书馆/自习室"},
-                    "date": {"type": "string", "description": "日期 YYYY-MM-DD；不传默认明天"},
+                    "date": {"type": "string", "description": "日期 YYYY-MM-DD；必须按系统提示第一行的今天换算（用户说明天就传明天的日期）；不传默认明天"},
                 },
                 "required": ["location"],
                 "additionalProperties": False,
@@ -247,7 +247,7 @@ CAMPUS_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "location": {"type": "string", "description": "位置名称关键词，如 图书馆/研讨间/自习"},
-                    "date": {"type": "string", "description": "日期 YYYY-MM-DD；不传默认明天"},
+                    "date": {"type": "string", "description": "日期 YYYY-MM-DD；必须按系统提示第一行的今天换算（用户说明天就传明天的日期）；不传默认明天"},
                     "slot": {
                         "type": "string",
                         "enum": ["morning", "afternoon", "evening"],

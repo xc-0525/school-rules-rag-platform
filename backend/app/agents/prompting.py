@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agents.prompts import STRICT_SYSTEM_PROMPT, SYSTEM_PROMPT
+from app.agents.prompts import STRICT_SYSTEM_PROMPT, SYSTEM_PROMPT, current_date_line
 from app.agents.state import AgentState
 
 def _history_messages(state: AgentState, limit: int = 6) -> list[dict[str, str]]:
@@ -35,7 +35,12 @@ def build_messages(state: AgentState, strict: bool = False) -> list[dict[str, st
     ]
     context = "\n\n".join(blocks) if blocks else "（无可用资料）"
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": STRICT_SYSTEM_PROMPT if strict else SYSTEM_PROMPT}
+        {
+            "role": "system",
+            "content": (STRICT_SYSTEM_PROMPT if strict else SYSTEM_PROMPT)
+            + "\n"
+            + current_date_line(),
+        }
     ]
     messages.extend(_history_messages(state, limit=6))
     messages.append(

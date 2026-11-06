@@ -14,6 +14,7 @@ from openai import (
     RateLimitError,
 )
 
+from app.agents.prompts import current_date_line
 from app.core.config import Settings
 
 
@@ -113,8 +114,10 @@ class DeepSeekLLM:
             {
                 "role": "system",
                 "content": (
-                    "你是校规问答系统的查询改写器。根据对话历史，把用户的追问改写成"
+                    current_date_line()
+                    + "\n你是校规问答系统的查询改写器。根据对话历史，把用户的追问改写成"
                     "一个不依赖上下文、可独立检索的完整问题；只输出改写后的问句，不要解释。"
+                    "改写涉及今天/明天/后天时，按第一行的日期换算成具体日期。"
                 ),
             }
         ]

@@ -17,11 +17,32 @@ LLM_UNAVAILABLE_ANSWER = (
     "本次只完成了知识库检索、未能生成答案。你的提问记录已保存，可稍后重试。"
 )
 
+
+def current_date_line(now=None) -> str:
+    """系统提示的第一行注入"今天"。
+
+    大模型侧没有时钟：不注入日期，它只能从对话历史里猜，跨天续聊时
+    会把昨天的"今天"当成现在（实测出现过 11-06 被当成 11-05）。
+    每次组装 prompt 都要重新调用——服务是常驻进程，不能用模块级常量缓存。
+    """
+    from datetime import date, timedelta
+
+    today: date = now or date.today()
+    weekday = "一二三四五六日"[today.weekday()]
+    tomorrow = today + timedelta(days=1)
+    day_after = today + timedelta(days=2)
+    return (
+        f"今天是 {today.isoformat()}（星期{weekday}）。"
+        f"用户说的“今天”指 {today.isoformat()}，“明天”指 {tomorrow.isoformat()}，"
+        f"“后天”指 {day_after.isoformat()}。"
+        "涉及日期一律以本行与工具返回的 res_date 为准，不要沿用对话历史中较早出现的日期。"
+    )
+
 SYSTEM_PROMPT = (
     "你是高校『校园服务与校纪校规』智能问答助手。必须严格遵守：\n"
     "1. 只能依据【背景资料】作答，禁止编造条款编号、处分等级、办理流程；\n"
     "2. 若【背景资料】不足以回答问题，直接回答“抱歉，未找到相关校规或校园服务信息”，"
-    "并建议咨询辅导员或学生工作处；\n"
+    "并建议咨询辅导员或学生工作处；但系统提示第一行给出的当前日期与星期可以直接回答，无需检索；\n"
     "3. 回答使用简体中文：先给结论，再逐条列出依据（注明文档名称与章节）；\n"
     "4. 语气客观严谨，不使用“应该”“大概”等模糊措辞。"
 )
@@ -65,7 +86,13 @@ _TOOL_RULES_CAMPUS = (
     "不要编造单号或时段；\n"
 )
 
-_TOOL_RULES_TAIL = "12. 不需要工具时不要强行调用；不要编造工具参数。"
+_TOOL_RULES_TAIL = "13. 不需要工具时不要强行调用；不要编造工具参数。"
+
+_TOOL_DATE_RULE = (
+    "12. 日期换算：你没有时钟，涉及“今天/明天/后天”的 date 参数，"
+    "一律按系统提示第一行的今天换算成 YYYY-MM-DD 再传；"
+    "禁止沿用历史消息里的日期，禁止凭空猜测。工具返回的 res_date 是权威日期；\n"
+)
 
 # 默认（开启校园工具）版本；保留常量供既有引用
 TOOL_SYSTEM_PROMPT = (
@@ -76,6 +103,7 @@ TOOL_SYSTEM_PROMPT = (
     + "。\n"
     + _TOOL_RULES_BASE
     + _TOOL_RULES_CAMPUS
+    + _TOOL_DATE_RULE
     + _TOOL_RULES_TAIL
 )
 
@@ -85,14 +113,21 @@ def tool_system_prompt(settings) -> str:
 
     消融实验必须同步裁掉工具清单与使用规则：只关下发、不改提示词的话，
     模型仍会根据提示词里的工具名尝试调用，对照组会被污染（实测关闭组仍有 4 题命中）。
+    日期行在函数内动态生成：服务常驻，模块级常量的"今天"会在跨天后过期。
     """
-    if getattr(settings, "campus_tools_enabled", True):
-        return TOOL_SYSTEM_PROMPT
-    return (
+    body = (
         _TOOL_PROMPT_HEAD
+        + "\n"
+        + _TOOL_LIST_BASE
+        + _TOOL_LIST_CAMPUS
+        + "。\n"
+        + _TOOL_RULES_BASE
+        + _TOOL_RULES_CAMPUS
+        if getattr(settings, "campus_tools_enabled", True)
+        else _TOOL_PROMPT_HEAD
         + "\n"
         + _TOOL_LIST_BASE
         + "。\n"
         + _TOOL_RULES_BASE
-        + _TOOL_RULES_TAIL
     )
+    return body + "\n" + _TOOL_DATE_RULE + _TOOL_RULES_TAIL + "\n" + current_date_line()
