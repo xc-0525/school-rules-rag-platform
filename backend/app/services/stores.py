@@ -26,15 +26,21 @@ class GraphStore(Protocol):
 
 
 class SemanticCache(Protocol):
-    def lookup(self, query: str) -> tuple[str, list[SourceItem]] | None: ...
+    def lookup(self, query: str, user_id: int = 0) -> tuple[str, list[SourceItem]] | None: ...
 
-    def store(self, query: str, answer: str, sources: list[SourceItem]) -> None: ...
+    def store(
+        self, query: str, answer: str, sources: list[SourceItem], user_id: int = 0
+    ) -> None: ...
 
 
 def normalize_question(query: str) -> str:
     """语义缓存（当前是精确归一化）用的文本归一化。"""
     drop = set("？?！!。.，,、；;：: 　\n\t")
     return "".join(ch for ch in query.strip() if ch not in drop).lower()
+
+def _cache_key(query: str, user_id: int) -> str:
+    """缓存键带用户：工具类回答（我的预约/我的报修）跨用户共享会泄露个人数据。"""
+    return f"{int(user_id or 0)}:{normalize_question(query)}"
 
 
 class MockVectorStore:
@@ -127,8 +133,8 @@ class MockSemanticCache:
             self.store(question, value["answer"], [SourceItem(**source) for source in value["sources"]])
         self._now = now
 
-    def lookup(self, query: str) -> tuple[str, list[SourceItem]] | None:
-        key = normalize_question(query)
+    def lookup(self, query: str, user_id: int = 0) -> tuple[str, list[SourceItem]] | None:
+        key = _cache_key(query, user_id)
         row = self._data.get(key)
         if row is None:
             return None
@@ -138,13 +144,15 @@ class MockSemanticCache:
             return None
         return answer, list(sources)
 
-    def store(self, query: str, answer: str, sources: list[SourceItem]) -> None:
+    def store(
+        self, query: str, answer: str, sources: list[SourceItem], user_id: int = 0
+    ) -> None:
         if not answer:
             return
         if len(self._data) >= self._max_entries:
             self._evict()
         expires_at = time.time() + self._ttl if self._ttl else float("inf")
-        self._data[normalize_question(query)] = (expires_at, answer, list(sources))
+        self._data[_cache_key(query, user_id)] = (expires_at, answer, list(sources))
 
     def _evict(self) -> None:
         """先清过期，再淘汰最接近过期的一条。"""

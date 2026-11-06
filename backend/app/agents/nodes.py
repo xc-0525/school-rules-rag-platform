@@ -50,7 +50,7 @@ from app.services import lexicon
 logger = logging.getLogger("app.agents")
 
 async def cache_lookup(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
-    hit = ctx.services.cache.lookup(state.query)
+    hit = ctx.services.cache.lookup(state.query, state.user_id)
     if hit is None:
         return {"cached": False}
 
@@ -303,5 +303,5 @@ async def persist_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
         and state.grounding_status == "verified"
         and state.answer
     ):
-        ctx.services.cache.store(state.query, state.answer, state.sources)
+        ctx.services.cache.store(state.query, state.answer, state.sources, state.user_id)
     return {"conversation_id": conversation_id, "message_id": message_id}

@@ -6,6 +6,7 @@ import {
   register as apiRegister,
 } from '../api/client'
 import { clearSession, getToken, getUser, setSession } from '../utils/session'
+import { useChatStore } from './chat'
 import type { UserInfo } from '../types'
 
 export const useAuthStore = defineStore('auth', {
@@ -26,6 +27,8 @@ export const useAuthStore = defineStore('auth', {
       this.token = response.token
       this.user = response.user
       setSession(response.token, response.user)
+      // 换号登录必须清掉上一个用户的内存聊天流，否则会串号
+      useChatStore().resetConversation()
       return response.user
     },
 
@@ -34,6 +37,7 @@ export const useAuthStore = defineStore('auth', {
       this.token = response.token
       this.user = response.user
       setSession(response.token, response.user)
+      useChatStore().resetConversation()
       return response.user
     },
 
@@ -46,6 +50,7 @@ export const useAuthStore = defineStore('auth', {
         this.token = null
         this.user = null
         clearSession()
+        useChatStore().resetConversation()
       }
     },
 
