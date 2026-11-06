@@ -406,8 +406,8 @@ class AuthTests(unittest.TestCase):
         )
         self.assertEqual(chat.status_code, 200, chat.text)
 
-        admin_list = client.get("/api/v1/conversations", headers=self._headers(admin)).json()
-        student_list = client.get("/api/v1/conversations", headers=self._headers(student)).json()
+        admin_list = client.get("/api/v1/conversations", headers=self._headers(admin)).json()["items"]
+        student_list = client.get("/api/v1/conversations", headers=self._headers(student)).json()["items"]
         self.assertTrue(admin_list)
         self.assertEqual(student_list, [])
 
