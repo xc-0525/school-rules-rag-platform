@@ -1393,10 +1393,42 @@ body {
 }
 
 .source-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
   margin-bottom: 8px;
+  padding: 3px 5px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
   font-size: 13px;
   font-weight: 600;
   color: #475569;
+  text-align: left;
+  cursor: pointer;
+}
+
+.source-title:hover {
+  background: rgba(31, 58, 95, 0.05);
+}
+
+.source-caret {
+  font-size: 9px;
+  color: #7b8494;
+  transition: transform 0.15s ease;
+}
+
+.source-caret.open {
+  transform: rotate(90deg);
+}
+
+.source-hint {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
 }
 
 .source-card {
