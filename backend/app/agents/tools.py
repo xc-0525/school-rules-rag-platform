@@ -363,7 +363,7 @@ CAMPUS_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "reservation_id": {"type": "integer", "description": "预约编号（已知时直接传）"},
+                    "reservation_id": {"type": "integer", "description": "仅当用户原话明确报出编号时才传；否则用 date/slot 定位或都留空，工具会列出可取消项。禁止使用历史消息里的旧编号"},
                     "date": {"type": "string", "description": "预约日期 YYYY-MM-DD，用于定位"},
                     "slot": {
                         "type": "string",

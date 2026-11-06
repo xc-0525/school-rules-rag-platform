@@ -175,7 +175,7 @@ class Settings:
             max_steps=_env_int("MAX_STEPS", 24),
             max_retrieval_rounds=_env_int("MAX_RETRIEVAL_ROUNDS", 2),
             max_regen=_env_int("MAX_REGEN", 1),
-            max_tool_rounds=_env_int("MAX_TOOL_ROUNDS", 2),
+            max_tool_rounds=_env_int("MAX_TOOL_ROUNDS", 3),
             memory_window=_env_int("MEMORY_WINDOW", 6),
             evidence_threshold=_env_float("EVIDENCE_THRESHOLD", 0.5),
             sufficiency_judge=os.getenv("SUFFICIENCY_JUDGE", "auto").strip().lower(),
