@@ -44,11 +44,26 @@ _RESERVED_USERNAMES = {"admin", "student"}
 # 匿名身份在 Mock 模式下的固定 id（MockPersistence 不做外键校验，取值只需稳定不冲突）
 MOCK_ANONYMOUS_ID = 9001
 
+# P0-1：占位符/弱密钥防呆——部署者原样复制 .env.docker.example 时直接拒绝启动。
+# 占位符是公开模板内容，等于密钥公开，可伪造任意 sub/role 的签名 token。
+_TOKEN_SECRET_PLACEHOLDERS = {
+    "CHANGE_ME_RANDOM_32_BYTES",
+    "CHANGE_ME",
+    "REPLACE_ME",
+    "your-secret-here",
+}
+_raw_token_secret = os.getenv("AUTH_TOKEN_SECRET", "").strip()
+if _raw_token_secret and (
+    _raw_token_secret in _TOKEN_SECRET_PLACEHOLDERS or len(_raw_token_secret) < 32
+):
+    raise SystemExit(
+        "AUTH_TOKEN_SECRET 配置不安全：不得使用模板占位符，且长度不得少于 32 字节。"
+        '生成：python -c "import secrets;print(secrets.token_urlsafe(32))"'
+    )
+
 # token 签名密钥：进程启动时确定一次，保证同一进程内多次建 app 的 token 互相有效。
 # 配置了 AUTH_TOKEN_SECRET 时多 worker 共享；未配置时退化为进程内随机值（重启失效）。
-_SECRET: bytes = (os.getenv("AUTH_TOKEN_SECRET", "").strip() or secrets.token_urlsafe(32)).encode(
-    "utf-8"
-)
+_SECRET: bytes = (_raw_token_secret or secrets.token_urlsafe(32)).encode("utf-8")
 
 
 def _demo_users() -> dict[str, tuple[str, str, int, str]]:

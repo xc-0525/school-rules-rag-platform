@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -134,6 +136,39 @@ class StaticGuardTests(unittest.TestCase):
             Settings(auth_required=True, dev_mode=True)  # 自相矛盾
         with self.assertRaises(ValueError):
             Settings(auth_required=False, dev_mode=False)  # 含糊状态
+
+
+class PlaceholderSecretGuardTests(unittest.TestCase):
+    """P0-1：占位符/弱密钥必须在启动时被拒绝（子进程验证，不影响本进程导入）。"""
+
+    def _import_auth(self, secret_env: str | None) -> subprocess.CompletedProcess:
+        env = dict(os.environ)
+        env.pop("AUTH_TOKEN_SECRET", None)
+        if secret_env is not None:
+            env["AUTH_TOKEN_SECRET"] = secret_env
+        return subprocess.run(
+            [sys.executable, "-c", "import app.services.auth"],
+            cwd=str(BACKEND_DIR),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    def test_placeholder_secret_rejected(self) -> None:
+        result = self._import_auth("CHANGE_ME_RANDOM_32_BYTES")
+        self.assertNotEqual(result.returncode, 0, "占位符密钥必须拒绝启动")
+        self.assertIn("配置不安全", result.stderr + result.stdout)
+
+    def test_short_secret_rejected(self) -> None:
+        result = self._import_auth("abc")
+        self.assertNotEqual(result.returncode, 0, "短密钥必须拒绝启动")
+
+    def test_valid_or_absent_secret_imports_fine(self) -> None:
+        ok = self._import_auth("x" * 40)
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        absent = self._import_auth(None)
+        self.assertEqual(absent.returncode, 0, absent.stderr)
 
 
 if __name__ == "__main__":
