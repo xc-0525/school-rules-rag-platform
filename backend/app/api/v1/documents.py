@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 import uuid
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,8 @@ ALLOWED_SUFFIXES = {".md", ".txt", ".pdf"}
 MAX_TEXT_BYTES = 5 * 1024 * 1024      # .md/.txt
 MAX_PDF_BYTES = 20 * 1024 * 1024      # .pdf
 UPLOAD_DIR = BASE_DIR / "data" / "uploads"
+
+logger = logging.getLogger("app.documents")
 
 try:  # 可选依赖：装了 python-multipart 才注册 multipart 上传接口
     import multipart as _multipart  # noqa: F401
@@ -205,10 +208,15 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
         try:
             await run_in_ingest_pool(ingestor.preflight)
         except GraphUnavailableError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001
+            # P0-2：GraphUnavailableError 文案自带 neo4j_uri（内网拓扑），不回给客户端
+            logger.exception("入库依赖预检失败（Neo4j/Qdrant 不可用）")
             raise HTTPException(
-                status_code=503, detail=f"入库依赖预检失败：{type(exc).__name__}: {exc}"
+                status_code=503, detail="入库依赖暂不可用，请稍后重试或联系管理员"
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("入库依赖预检失败")
+            raise HTTPException(
+                status_code=503, detail="入库依赖暂不可用，请稍后重试"
             ) from exc
 
         if target_path is not None:
@@ -242,8 +250,10 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
             target.unlink(missing_ok=True)
+            # P0-2：解析异常可能携带服务器绝对路径，只进日志
+            logger.exception("文档解析失败 filename=%s", safe_name)
             raise HTTPException(
-                status_code=400, detail=f"解析失败：{type(exc).__name__}: {exc}"
+                status_code=400, detail="文档解析失败，请检查文件格式（PDF 需为文字版）"
             ) from exc
 
         if not document.chunks:
@@ -260,11 +270,16 @@ def build_router(services: Any, settings: Settings) -> APIRouter:
             )
         except GraphUnavailableError as exc:
             target.unlink(missing_ok=True)
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            # P0-2：异常文案自带 neo4j_uri，只进日志
+            logger.exception("入库失败（Neo4j 不可用）")
+            raise HTTPException(
+                status_code=503, detail="入库依赖暂不可用，请稍后重试或联系管理员"
+            ) from exc
         except Exception as exc:  # noqa: BLE001
             target.unlink(missing_ok=True)
+            logger.exception("入库失败 title=%s", document.title if document else None)
             raise HTTPException(
-                status_code=500, detail=f"入库失败：{type(exc).__name__}: {exc}"
+                status_code=500, detail="入库失败，请稍后重试或联系管理员"
             ) from exc
 
         # 新文档入库后清空问题缓存，避免旧问题继续命中旧答案/旧来源

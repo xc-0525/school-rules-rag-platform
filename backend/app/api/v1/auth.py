@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -17,6 +18,8 @@ from app.services.auth import (
     register_user,
     require_user,
 )
+
+logger = logging.getLogger("app.api.auth")
 
 
 def build_router(settings: Settings) -> APIRouter:
@@ -33,8 +36,10 @@ def build_router(settings: Settings) -> APIRouter:
                 authenticate, settings, payload.username, payload.password
             )
         except Exception as exc:  # noqa: BLE001
+            # P0-2：原始异常（含 MySQL 主机/账号/错误码）只进日志，不回给客户端
+            logger.exception("登录服务不可用（MySQL 连接失败）")
             raise HTTPException(
-                status_code=503, detail=f"登录服务暂不可用（MySQL 连接失败）：{exc}"
+                status_code=503, detail="登录服务暂不可用，请稍后重试"
             ) from exc
         if user is None:
             raise HTTPException(status_code=401, detail="用户名或密码错误")
@@ -68,8 +73,10 @@ def build_router(settings: Settings) -> APIRouter:
         except RegistrationError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
         except Exception as exc:  # noqa: BLE001
+            # P0-2：同登录接口，原始异常只进日志
+            logger.exception("注册服务不可用（MySQL 连接失败）")
             raise HTTPException(
-                status_code=503, detail=f"注册服务暂不可用（MySQL 连接失败）：{exc}"
+                status_code=503, detail="注册服务暂不可用，请稍后重试"
             ) from exc
         token, expires_in = auth_tokens.issue(user)
         return LoginResponse(

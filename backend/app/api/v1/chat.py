@@ -44,8 +44,10 @@ def sse_event(event: str, payload: dict[str, Any]) -> str:
 
 def _friendly_error(exc: Exception) -> str:
     if isinstance(exc, (LLMError, WorkflowError)):
-        return str(exc)
-    return f"服务内部错误：{type(exc).__name__}: {exc}"
+        return str(exc)  # 业务文案，本就面向用户
+    # P0-2：非业务异常不回显类型与内容（可能含路径/内网地址），只进日志
+    logger.exception("chat 内部错误")
+    return "服务内部错误，请稍后重试"
 
 
 def _source_dicts(state: AgentState) -> list[dict[str, Any]]:

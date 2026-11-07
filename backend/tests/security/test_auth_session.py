@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -216,6 +217,30 @@ class RegistrationPolicyTests(unittest.TestCase):
         self.assertEqual(unknown_user.status_code, 401)
         self.assertEqual(wrong_password.json()["detail"], unknown_user.json()["detail"])
         self.assertNotIn("pass1234", wrong_password.text)
+
+
+class ErrorEchoGuardTests(unittest.TestCase):
+    """P0-2：服务故障时对外固定文案，原始异常（主机/账号/错误类型）只进日志。"""
+
+    def setUp(self) -> None:
+        self.client = make_client(dev_settings())
+
+    def test_login_503_does_not_echo_mysql_error(self) -> None:
+        import app.api.v1.auth as auth_api
+
+        def boom(settings, username, password):  # noqa: ARG001
+            raise RuntimeError(
+                "Access denied for user 'root'@'10.0.0.5' (using password: YES)"
+            )
+
+        with unittest.mock.patch.object(auth_api, "authenticate", boom):
+            response = self.client.post(
+                "/api/v1/auth/login", json={"username": "secstu", "password": "x-pass"}
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "登录服务暂不可用，请稍后重试")
+        for leak in ["root", "10.0.0.5", "RuntimeError", "Access denied"]:
+            self.assertNotIn(leak, response.text, msg=f"响应泄露: {leak}")
 
 
 if __name__ == "__main__":
