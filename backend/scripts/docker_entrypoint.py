@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import os
 import socket
+import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 
 def log(message: str) -> None:
@@ -107,8 +109,36 @@ def wait_qdrant(timeout: float = 240.0) -> None:
     raise SystemExit(f"等待 Qdrant 超时：{last_error}")
 
 
+def seed_users() -> None:
+    """P0-4：首启账号种子（幂等；弱口令/未配置时由脚本自行决定行为）。
+
+    失败不阻断启动：seed 失败只影响"能否登录"，服务本体仍可运行，
+    交由运维查看日志处理（与"登录服务暂不可用"文案同一处理哲学）。
+    """
+    if not os.getenv("MYSQL_URL", "").strip():
+        return
+    script = Path(__file__).resolve().parent / "seed_users.py"
+    log("执行账号种子 seed_users.py ...")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        log("seed 超时（不阻断启动）")
+        return
+    for line in (result.stdout or "").splitlines():
+        log(line)
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip().splitlines()
+        log(f"seed 失败（不阻断启动）：{stderr[-1] if stderr else '未知错误'}")
+
+
 def main() -> None:
     wait_mysql()
+    seed_users()
     wait_neo4j()
     wait_qdrant()
 

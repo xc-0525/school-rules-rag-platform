@@ -56,7 +56,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_backend.ps1
 # 4) 可选：前端开发模式（改前端代码/热更新时用；日常演示直接用 8000 即可）
 powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 # 浏览器：http://127.0.0.1:5173
-# 演示账号：admin（管理员）、student（学生）；初始密码见项目交付说明，不写入仓库
+# 演示账号：admin（管理员）、student（学生）；初始口令由首启 seed 生成（启动日志打印一次，请立即修改），也可用 INIT_ADMIN_PASSWORD / INIT_STUDENT_PASSWORD 指定；旧固定口令已于 2026-11-07 作废（安全修复 P0-4）
 # 登录页也支持自助注册（默认学生角色），可用新账号演示"自己的历史会话"
 ```
 

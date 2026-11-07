@@ -207,20 +207,12 @@ CREATE TABLE IF NOT EXISTS tool_call_logs (
 -- ============================================================================
 
 -- 用户：admin（管理员）、student（演示学生）
--- 密码为 PBKDF2-SHA256 哈希（初始密码见项目交付说明，不写入仓库）
-INSERT INTO users (username, password, nickname, role, status)
-SELECT 'admin',
-       'pbkdf2_sha256$120000$+9CXBlRIpa16zcV95Rmgmw==$b6Dl0J92N3ov3n16MK9VYAyIEFYfqkAt+BCwcwrTfVI=',
-       '管理员', 'admin', 1
-FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin');
-
-INSERT INTO users (username, password, nickname, role, status)
-SELECT 'student',
-       'pbkdf2_sha256$120000$vcem5ZikTGvNbg9WExbmdw==$gF0CvflQJgZIfZESYk1Fc9eiWuczlJ2VKX26WsFgpy0=',
-       '演示学生', 'student', 1
-FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'student');
+-- P0-4：仓库不再内嵌任何口令哈希（旧哈希对应弱口令，且口令明文已随交付物扩散，
+-- 等效于口令公开）。账号种子改由 backend/scripts/seed_users.py 在容器首启执行：
+--   * 口令来自 INIT_ADMIN_PASSWORD / INIT_STUDENT_PASSWORD，未配置则随机生成并
+--     在启动日志打印一次；显式拒绝已知弱口令与 <10 位口令；
+--   * 幂等：账号已存在则跳过，不会重置已有口令。
+-- 首次部署后请立即登录修改口令。
 
 -- 默认文档标签
 INSERT INTO document_tags (name)

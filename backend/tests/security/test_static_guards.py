@@ -171,5 +171,44 @@ class PlaceholderSecretGuardTests(unittest.TestCase):
         self.assertEqual(absent.returncode, 0, absent.stderr)
 
 
+class SeedUsersGuardTests(unittest.TestCase):
+    """P0-4：仓库不内嵌口令哈希；seed 脚本拒绝弱口令。"""
+
+    def test_init_sql_has_no_embedded_password_hash(self) -> None:
+        sql_path = BACKEND_DIR.parent / "sql" / "init_mysql.sql"
+        if not sql_path.is_file():
+            self.skipTest("sql/init_mysql.sql 不存在")
+        content = read_text(sql_path)
+        self.assertNotIn("pbkdf2_sha256$", content, "init_mysql.sql 不得内嵌口令哈希")
+        self.assertNotIn("admin123", content)
+        self.assertNotIn("student123", content)
+
+    def test_seed_script_rejects_weak_passwords(self) -> None:
+        import importlib.util
+
+        script = BACKEND_DIR / "scripts" / "seed_users.py"
+        if not script.is_file():
+            self.skipTest("scripts/seed_users.py 不存在")
+        spec = importlib.util.spec_from_file_location("seed_users", script)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        for weak in ["admin123", "student123", "123456", "password"]:
+            with self.assertRaises(SystemExit, msg=f"应拒绝 {weak}"):
+                module.validate_password(weak, "INIT_ADMIN_PASSWORD")
+        with self.assertRaises(SystemExit, msg="应拒绝过短口令"):
+            module.validate_password("Ab1!", "INIT_ADMIN_PASSWORD")
+        self.assertEqual(
+            module.validate_password("S3cure-Pass-2026!", "INIT_ADMIN_PASSWORD"),
+            "S3cure-Pass-2026!",
+        )
+
+    def test_entrypoint_wires_seed_before_serving(self) -> None:
+        entry = read_text(BACKEND_DIR / "scripts" / "docker_entrypoint.py")
+        self.assertIn("seed_users()", entry, "entrypoint 必须在启动服务前执行 seed")
+        self.assertIn("seed_users.py", entry)
+
+
 if __name__ == "__main__":
     unittest.main()
