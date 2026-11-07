@@ -26,6 +26,7 @@
     {"id": "q21", "question": "校医院在哪儿？看病怎么报销？", "document": "", "article": "", "expect": "", "answerable": false, "reason": "语料未收录校医院相关制度"},
     {"id": "q22", "question": "校车几点发车？", "document": "", "article": "", "expect": "", "answerable": false, "reason": "语料未收录校车/班车时刻"},
     {"id": "q23", "question": "校园里停车怎么收费？", "document": "", "article": "", "expect": "", "answerable": false, "reason": "语料未收录车辆停放规定"},
-    {"id": "q24", "question": "快递在哪里取？", "document": "", "article": "", "expect": "", "answerable": false, "reason": "语料未收录快递收发规定"}
+    {"id": "q24", "question": "快递在哪里取？", "document": "", "article": "", "expect": "", "answerable": false, "reason": "语料未收录快递收发规定"},
+    {"id": "q25", "question": "考试时带手机进考场会怎么处理？", "document": "02-普通高等学校学生管理规定", "article": "第十八条", "expect": "该课程考核成绩记为无效", "answerable": true}
   ]
 }

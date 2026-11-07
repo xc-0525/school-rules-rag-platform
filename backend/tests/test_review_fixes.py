@@ -372,7 +372,9 @@ class SufficiencyJudgeTests(unittest.TestCase):
         self.assertTrue(result["refused"])
         self.assertEqual(len(result["sources"]), 3, "应带回相关度最高的 3 条")
         self.assertEqual(result["sources"][0].detail, "第1条", "按相关度排序")
-        self.assertIn("未找到", result["answer"])
+        # 拒答文案不再说"建议换一种说法"（换说法通常也答不出），改为说明知识库未覆盖
+        self.assertIn("没有能直接回答", result["answer"])
+        self.assertNotIn("换一种说法", result["answer"])
 
     def test_route_generates_when_sufficient(self) -> None:
         settings = make_settings()

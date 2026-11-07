@@ -143,6 +143,85 @@ SLOT_ALIASES = {
     "evening": "evening",
 }
 
+# 场馆别名：库里的正式名与学生口语不一致（库里“研讨间”，学生说“研讨室/讨论室”）。
+# 精确子串匹配不到时按这张表归一，避免把"有位置"答成"没有这个位置"。
+LOCATION_ALIASES: dict[str, tuple[str, ...]] = {
+    "研讨室": ("研讨间", "讨论室"),
+    "讨论室": ("研讨间", "研讨室"),
+    "会议室": ("研讨间",),
+    "研讨间": ("研讨室", "讨论室"),
+    "自习室": ("自习区",),
+    "自习区": ("自习室",),
+    "阅览室": ("阅览",),
+    "电子阅览室": ("电子阅览",),
+}
+
+
+def _normalize_location_text(text: str) -> str:
+    """去掉空格与分隔符并转小写，让“图书馆 A 区”与“图书馆a区”可比。"""
+    import re
+
+    return re.sub(r"[\s\-_·、,，。]+", "", str(text or "")).lower()
+
+
+def match_locations(
+    locations: list[dict[str, Any]], keyword: str
+) -> tuple[list[dict[str, Any]], str]:
+    """四层策略匹配位置名，返回（命中位置, 匹配说明）。
+
+    1) 原始子串：用户说的正是库里的叫法；
+    2) 别名归一：研讨室 → 研讨间（学生口语与正式名不一致）；
+    3) 去空格小写：'图书馆a区' → '图书馆一楼自习区a区'；
+    4) 二元组重合：拆碎后仍能对上（'图书馆a区座位' vs 正式名命中 图书/书馆/a区）。
+
+    全部落空返回空列表，调用方负责把可选位置清单回给模型，让它可以纠正或告知用户。
+    """
+    keyword = str(keyword or "").strip()
+    if not keyword:
+        return list(locations), ""
+    names = [str(loc.get("name") or "") for loc in locations]
+
+    hits = [loc for loc, name in zip(locations, names) if keyword in name]
+    if hits:
+        return hits, ""
+
+    for alias in LOCATION_ALIASES.get(keyword, ()):
+        hits = [loc for loc, name in zip(locations, names) if alias in name]
+        if hits:
+            return hits, f"按近义名称「{alias}」匹配"
+
+    flat_keyword = _normalize_location_text(keyword)
+    if flat_keyword:
+        hits = [
+            loc
+            for loc, name in zip(locations, names)
+            if flat_keyword in _normalize_location_text(name)
+        ]
+        if hits:
+            return hits, ""
+
+    if len(flat_keyword) >= 2:
+        grams = {flat_keyword[i : i + 2] for i in range(len(flat_keyword) - 1)}
+        # 至少覆盖一半的关键词片段，且只保留得分最高者：
+        # 否则"图书馆a区"会把 4 个都以"图书馆"开头的位置全带出来。
+        need = max(2, (len(grams) + 1) // 2)
+        scored: list[tuple[int, dict[str, Any]]] = []
+        for loc, name in zip(locations, names):
+            flat_name = _normalize_location_text(name)
+            overlap = sum(1 for gram in grams if gram in flat_name)
+            if overlap >= 2:
+                scored.append((overlap, loc))
+        if scored:
+            best = max(score for score, _ in scored)
+            if best >= need:
+                return [
+                    loc for score, loc in sorted(scored, key=lambda item: -item[0])
+                    if score == best
+                ], "按关键词相近度匹配"
+
+    return [], ""
+
+
 CAMPUS_TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
@@ -201,7 +280,7 @@ CAMPUS_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "location": {"type": "string", "description": "位置名称关键词，如 图书馆/自习室"},
+                    "location": {"type": "string", "description": "位置名称关键词，可用用户口语（图书馆/自习区/自习室/研讨室/研讨间），工具会自动做近义匹配"},
                     "date": {"type": "string", "description": "日期 YYYY-MM-DD；必须按系统提示第一行的今天换算（用户说明天就传明天的日期）；不传默认明天"},
                 },
                 "required": ["location"],
@@ -828,15 +907,22 @@ class ToolRunner:
         except Exception:  # noqa: BLE001
             logger.exception("query_location_availability list_locations failed")
             locations = []
+        match_note = ""
+        all_names = [str(loc.get("name") or "") for loc in locations]
         if keyword:
-            locations = [loc for loc in locations if keyword in str(loc.get("name", ""))]
+            locations, match_note = match_locations(locations, keyword)
         if not locations:
+            available = "、".join(all_names) if all_names else "（系统未配置可预约位置）"
             return ToolResult(
                 name="query_location_availability",
                 arguments={"location": keyword, "date": res_date},
                 success=True,
-                summary=f"没有找到名称包含“{keyword}”的可预约位置。",
-                payload={"locations": []},
+                summary=(
+                    f"没有找到与“{keyword}”匹配的可预约位置。"
+                    f"当前可预约位置：{available}。"
+                    "请从中选择，或向用户确认到底要哪一个。"
+                ),
+                payload={"locations": [], "available": all_names},
             )
 
         lines, payload = [], []
@@ -885,7 +971,8 @@ class ToolRunner:
             arguments={"location": keyword, "date": res_date},
             success=True,
             summary=(
-                "场馆余量查询结果：\n\n"
+                (f"（{match_note}）\n" if match_note else "")
+                + "场馆余量查询结果：\n\n"
                 + "\n".join(lines)
                 + "\n\n如需预约，请告诉我要约的位置、日期和时段（例如“约明天下午的研讨间”），"
                 "我可以生成预约草稿，由你确认后生效。"

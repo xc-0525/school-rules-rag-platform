@@ -21,6 +21,41 @@ from app.schemas.chat import Evidence, SourceItem
 
 logger = logging.getLogger("app.agents")
 
+# 办理意图的确定性判定（不看 LLM）：动作词 + 业务名词，且不带咨询标记。
+# 用于兜底——模型偶尔把"把两个都取消了然后约A区"当成校规咨询，直接去检索并拒答。
+_ACTION_VERBS = (
+    "取消", "约", "预约", "预定", "订", "报修", "维修",
+    "发布", "认领", "结案", "标记", "改期", "换",
+)
+_SERVICE_NOUNS = (
+    "预约", "座位", "自习", "研讨", "阅览", "场馆",
+    "报修", "工单", "失物", "招领", "物品",
+)
+# 只保留真正表示"在问规则"的词；"能不能/可以吗"这类祈使句不能算咨询标记
+_CONSULT_MARKERS = (
+    "怎么", "如何", "怎样", "流程", "规定", "条件", "几点",
+    "什么时候", "多久", "是否", "是什么", "哪些", "多少钱", "要求",
+)
+# “我想约202”“要201”这类：只给房号/区号，没有业务名词，也属于办理指令
+_ROOM_REF = re.compile(r"[约订]\s*[0-9]{1,4}|[约订]\s*[a-zA-Z]\s*区|要\s*[0-9]{1,4}")
+
+
+def _looks_like_action(query: str) -> bool:
+    """用户这句话是不是明确的办理指令（确定性规则，供工具选择兜底）。"""
+    text = (query or "").strip()
+    if not text:
+        return False
+    if any(marker in text for marker in _CONSULT_MARKERS):
+        return False
+    if any(verb in text for verb in _ACTION_VERBS) and any(
+        noun in text for noun in _SERVICE_NOUNS
+    ):
+        return True
+    if "大约" not in text and "约莫" not in text and _ROOM_REF.search(text):
+        return True
+    return False
+
+
 async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     """让 LLM 选择业务工具并执行；结果回填证据，或直接生成工具型回答。"""
     run_id = state.run_id or uuid.uuid4().hex[:12]
@@ -36,6 +71,7 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     search_evidence: list[Evidence] = []
     tool_evidence: list[Evidence] = []
     call_records: list[dict[str, Any]] = []
+    nudged = False
 
     for _ in range(max(1, ctx.settings.max_tool_rounds)):
         try:
@@ -48,6 +84,27 @@ async def tool_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
 
         calls = assistant.get("tool_calls") or []
         if not calls:
+            # 兜底：用户原话是明确的办理指令，模型却想当校规咨询直接作答。
+            # 只纠一次（nudged），避免在不需要工具时反复追问模型浪费时间。
+            # 用 state.query（用户原话）判定，不用改写串——改写器可能已把它变成疑问句。
+            if (
+                not nudged
+                and getattr(ctx.settings, "campus_tools_enabled", True)
+                and _looks_like_action(state.query)
+            ):
+                nudged = True
+                logger.info("工具选择兜底：原话含办理动作但模型未选工具，要求重新决策")
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "（系统提示）用户这句话是在办理业务，不是校规咨询。"
+                            "请从工具清单中选择合适的工具执行；缺少参数时先调用只读查询工具补齐，"
+                            "不要直接给出咨询式回答。"
+                        ),
+                    }
+                )
+                continue
             break
 
         messages.append(
