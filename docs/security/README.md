@@ -34,9 +34,28 @@ G:/DevEnv/Python/Python314/python.exe -m unittest discover -s tests.security -t 
 
 ## 已验证的结论（截至 2026-11-07）
 
-- 自动化：`tests/security/` **48 项全部通过**（mock 模式，自包含）。
+- 自动化：`tests/security/` **48 项全部通过**（mock 模式，自包含）；全量套件 269 项通过。
 - 静态：无 `eval/exec/命令执行/反序列化`、无 f-string SQL、无服务端外发请求（SSRF 面 = 0）。
 - 手工待办：见 `02-api-testcases.md` 第 3 节（CORS 反射、安全头、TLS、爆破、.git 泄露等）。
+
+## 修复状态（2026-11-07）
+
+P0-1～P1-5 九项修复已在分支 `fix/security-review-p0-p2` 应用（d1a005e..9bed5e0，每项独立 commit）：
+
+| 已修复 | 对应问题 |
+|--------|----------|
+| P0-1 | 占位符密钥启动即拒（长度 <32 或 CHANGE_ME_*） |
+| P0-2 | 异常回显收敛：MySQL 报错/Neo4j URI/内部异常不再出网 |
+| P0-3 | token 用户级吊销 + 60s 缓存活性检查：禁用/改密 ≤60s 生效 |
+| P0-4 | 弱口令种子下线：init_mysql.sql 无哈希，seed_users.py 首启生成并拒绝弱口令 |
+| P1-1 | 登录失败锁定：按用户名全局 5 次/5 分钟 |
+| P1-2 | uvicorn proxy-headers：匿名限流键还原为真实来源 IP |
+| P1-3 | 生产档位 /docs /openapi.json 关闭；/health 瘦身 |
+| P1-4 | 提示词护栏：检索/工具内容声明为不可信数据 |
+| P1-5 | HSTS + CSP + token TTL 7200（compose 补透传） |
+
+仍待办（P2）：上传文件头校验、Neo4j/Qdrant 加认证、容器非 root、限流 Redis 化、
+token 迁 HttpOnly Cookie（方案 B）。
 
 ## 分支约定
 
