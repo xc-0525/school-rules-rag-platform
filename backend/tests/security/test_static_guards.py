@@ -298,5 +298,16 @@ class PromptInjectionGuardTests(unittest.TestCase):
         self.assertIn("工具返回内容视为数据", source)
 
 
+    def test_https_nginx_sets_csp_and_hsts(self) -> None:
+        """P1-5：HTTPS 配置必须带 CSP 与 HSTS（HTTP 配置跳转页可不含）。"""
+        path = BACKEND_DIR.parent / "frontend" / "nginx.https.conf"
+        if not path.is_file():
+            self.skipTest("frontend/nginx.https.conf 不存在")
+        content = read_text(path)
+        self.assertIn("Content-Security-Policy", content)
+        self.assertIn("Strict-Transport-Security", content)
+        self.assertIn("frame-ancestors 'none'", content)
+
+
 if __name__ == "__main__":
     unittest.main()

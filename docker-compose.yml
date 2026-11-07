@@ -8,6 +8,8 @@ x-backend-env: &backend-env
   AUTH_REQUIRED: "${AUTH_REQUIRED:-1}"
   # 多 worker / 重启免登录的关键；不配置时 token 只在单进程内有效
   AUTH_TOKEN_SECRET: "${AUTH_TOKEN_SECRET:-}"
+  # P1-5：token 有效期透传（公网建议 7200）；compose 此前未透传，该变量只在本地生效
+  AUTH_TOKEN_TTL: "${AUTH_TOKEN_TTL:-28800}"
   RATE_LIMIT_ENABLED: "${RATE_LIMIT_ENABLED:-1}"
   RATE_LIMIT_PER_MINUTE: "${RATE_LIMIT_PER_MINUTE:-20}"
   RATE_LIMIT_PER_DAY: "${RATE_LIMIT_PER_DAY:-300}"
