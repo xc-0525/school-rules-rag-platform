@@ -173,7 +173,7 @@ curl -s localhost/health | head -c 200              # 看 vector_ready / graph �
 docker stats --no-stream                            # 各容器内存是否逼近 limit
 curl -s -X POST localhost/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin123"}' | head -c 120
+  -d '{"username":"admin","password":"<部署时生成的管理员密码>"}' | head -c 120
 ```
 
 浏览器打开 `http://<公网IP>/`，登录后问一句「宿舍晚上几点熄灯」，能出带来源的回答即可。

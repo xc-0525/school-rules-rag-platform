@@ -252,3 +252,20 @@ docs/开题-*.md
 
 # 源代码交付压缩包（本地打包产物）
 校园服务智能问答系统-课程设计源代码.zip
+
+# ===== 非代码资料（答辩/报告/汇报材料），统一归档到父目录 非代码资料/ =====
+# 这些文件不再属于系统实现，禁止再次入库
+*.ppt
+*.pptx
+*.doc
+*.docx
+*.xls
+*.xlsx
+答辩PPT/
+output/
+screenshots/
+docs/答辩现场操作卡.md
+docs/选题与名称记录.md
+docs/tool-ablation-report.md
+docs/security-review-*.md
+docs/开题-*.md
