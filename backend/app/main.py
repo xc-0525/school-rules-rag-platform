@@ -101,6 +101,11 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         title=f"{settings.app_name} · v2",
         version=settings.version,
         lifespan=lifespan,
+        # P1-3：生产档位（AUTH_REQUIRED=1）关闭交互式文档与 API 清单，
+        # 防止公网经 nginx（此前显式代理 /docs）枚举全部接口。本地 dev 保留。
+        docs_url=None if settings.auth_required else "/docs",
+        redoc_url=None if settings.auth_required else "/redoc",
+        openapi_url=None if settings.auth_required else "/openapi.json",
         description=(
             "**自研 Agent 图引擎**：10+ 节点，支持并行 / 选择 / 循环三种控制结构，"
             "每个节点执行通过 SSE `trace` 事件实时输出。\n\n"
@@ -174,7 +179,10 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
     @app.get("/health", tags=["运维"], summary="健康检查")
     async def health() -> dict[str, Any]:
-        return {
+        # P1-3：公开面只保留探活必需与前端依赖字段（App.vue 用 modes.vector/graph、
+        # vector_ready）；auth/dev_mode/token/rate_limit/registration/llm_configured
+        # 属部署敏感档位，仅 DEV_MODE 下返回。
+        payload: dict[str, Any] = {
             "status": "ok",
             "version": settings.version,
             "modes": {
@@ -182,13 +190,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                 "graph": settings.graph_mode,
                 "llm": settings.llm_mode,
                 "persistence": "mysql" if settings.mysql_url else "mock",
-                "auth": "required" if settings.auth_required else "dev-anonymous",
-                "dev_mode": settings.dev_mode,
-                "token": "signed" if settings.token_secret else "ephemeral-secret",
-                "rate_limit": "on" if settings.rate_limit_enabled else "off",
-                "registration": "open" if settings.allow_registration else "closed",
             },
-            "llm_configured": settings.llm_configured,
             "vector_ready": getattr(app.state, "vector_ready", None),
             "graph": {
                 "node_count": len(nodes),
@@ -198,6 +200,18 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
                 ),
             },
         }
+        if settings.dev_mode:
+            payload["modes"].update(
+                {
+                    "auth": "required" if settings.auth_required else "dev-anonymous",
+                    "dev_mode": settings.dev_mode,
+                    "token": "signed" if settings.token_secret else "ephemeral-secret",
+                    "rate_limit": "on" if settings.rate_limit_enabled else "off",
+                    "registration": "open" if settings.allow_registration else "closed",
+                }
+            )
+            payload["llm_configured"] = settings.llm_configured
+        return payload
 
     @app.get("/ready", include_in_schema=False)
     async def ready() -> dict[str, Any]:

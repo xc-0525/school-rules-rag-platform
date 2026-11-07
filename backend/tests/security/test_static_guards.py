@@ -210,5 +210,53 @@ class SeedUsersGuardTests(unittest.TestCase):
         self.assertIn("seed_users.py", entry)
 
 
+class PublicSurfaceTests(unittest.TestCase):
+    """P1-3：生产档位不暴露交互式文档；/health 不含部署敏感字段；dev 档位不受影响。"""
+
+    def _client(self, auth_required: bool):
+        from fastapi.testclient import TestClient
+
+        from app.core.config import Settings
+        from app.main import create_app
+        from app.services.container import build_services
+        from app.services.llm import FakeLLM
+
+        settings = Settings(
+            llm_mode="fake",
+            vector_mode="mock",
+            graph_mode="mock",
+            auth_required=auth_required,
+            dev_mode=not auth_required,
+        )
+        services = build_services(settings)
+        services.llm = FakeLLM()
+        return TestClient(create_app(settings, services=services))
+
+    def test_prod_hides_docs_and_openapi(self) -> None:
+        client = self._client(auth_required=True)
+        for path in ["/docs", "/redoc", "/openapi.json"]:
+            response = client.get(path)
+            self.assertEqual(response.status_code, 404, msg=f"{path} 生产档位应 404")
+
+    def test_prod_health_has_no_sensitive_fields(self) -> None:
+        client = self._client(auth_required=True)
+        response = client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "ok")
+        # 前端 App.vue 依赖字段必须保留
+        self.assertIn("vector", body["modes"])
+        self.assertIn("graph", body["modes"])
+        self.assertIn("vector_ready", body)
+        # 部署敏感字段不得出现在生产 /health
+        for leak in ["dev_mode", "token", "rate_limit", "registration", "llm_configured"]:
+            self.assertNotIn(leak, body, msg=f"/health 泄露部署信息: {leak}")
+        self.assertNotIn("auth", body["modes"], "/health 泄露鉴权档位")
+
+    def test_dev_still_has_docs(self) -> None:
+        client = self._client(auth_required=False)
+        self.assertEqual(client.get("/docs").status_code, 200)
+
+
 if __name__ == "__main__":
     unittest.main()
