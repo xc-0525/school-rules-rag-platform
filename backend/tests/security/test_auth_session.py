@@ -243,5 +243,70 @@ class ErrorEchoGuardTests(unittest.TestCase):
             self.assertNotIn(leak, response.text, msg=f"响应泄露: {leak}")
 
 
+class LoginLockoutTests(unittest.TestCase):
+    """P1-1：按用户名全局失败锁定——换 IP 也绕不过；成功登录清零。"""
+
+    def setUp(self) -> None:
+        settings = Settings(
+            llm_mode="fake",
+            vector_mode="mock",
+            graph_mode="mock",
+            auth_required=True,
+            dev_mode=False,
+            rate_limit_per_minute=0,  # 关闭分钟限流，只验证失败锁定维度
+            rate_limit_per_day=0,
+            rate_limit_enabled=True,
+        )
+        services = build_services(settings)
+        services.llm = FakeLLM()
+        self.client = TestClient(create_app(settings, services=services))
+        created = self.client.post(
+            "/api/v1/auth/register",
+            json={"username": "lockstu01", "password": "pass1234"},
+        )
+        # 409 = 同进程先前的测试类已注册过（_registered_users 模块级共享），口令一致可直接用
+        self.assertIn(created.status_code, (201, 409), created.text)
+
+    def _login(self, password: str):
+        return self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "lockstu01", "password": password},
+        )
+
+    def test_locks_after_threshold_even_with_correct_password(self) -> None:
+        for _ in range(5):
+            response = self._login("wrong-password")
+            self.assertEqual(response.status_code, 401)
+        # 第 6 次即使密码正确也拒绝：锁定按用户名全局生效
+        blocked = self._login("pass1234")
+        self.assertEqual(blocked.status_code, 429, blocked.text)
+        self.assertIn("Retry-After", blocked.headers)
+        self.assertNotIn("pass1234", blocked.text)
+
+    def test_success_login_resets_failure_count(self) -> None:
+        """成功登录清空失败计数：4 败→1 成→再 4 败仍不锁定。"""
+        for _ in range(4):
+            self.assertEqual(self._login("wrong-password").status_code, 401)
+        ok = self._login("pass1234")
+        self.assertEqual(ok.status_code, 200, ok.text)
+        for _ in range(4):
+            self.assertEqual(self._login("wrong-password").status_code, 401)
+        still_ok = self._login("pass1234")
+        self.assertEqual(still_ok.status_code, 200, "成功登录应清空失败计数")
+
+    def test_other_usernames_unaffected(self) -> None:
+        for _ in range(5):
+            self.client.post(
+                "/api/v1/auth/login",
+                json={"username": "lockstu01", "password": "wrong-password"},
+            )
+        other = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "nobody404", "password": "whatever1"},
+        )
+        self.assertEqual(other.status_code, 401, "其他账号不得被连带锁定")
+        self.assertEqual(other.json()["detail"], "用户名或密码错误")
+
+
 if __name__ == "__main__":
     unittest.main()

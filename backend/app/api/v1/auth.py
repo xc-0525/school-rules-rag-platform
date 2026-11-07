@@ -22,7 +22,7 @@ from app.services.auth import (
 logger = logging.getLogger("app.api.auth")
 
 
-def build_router(settings: Settings) -> APIRouter:
+def build_router(settings: Settings, limiter: Any | None = None) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["鉴权"])
 
     @router.post(
@@ -31,6 +31,18 @@ def build_router(settings: Settings) -> APIRouter:
         summary="登录（演示账号与初始密码见项目交付说明）",
     )
     async def login(payload: LoginRequest):
+        # P1-1：按"用户名"全局失败锁定——换 IP/分布式爆破也会被累计。
+        # 锁定返回 429（与 401 文案区分），不泄露账号是否存在。
+        lock_key = f"login:user:{payload.username.lower()}"
+        lock_enabled = limiter is not None and settings.rate_limit_enabled
+        if lock_enabled:
+            locked, retry_after = limiter.is_locked(lock_key)
+            if locked:
+                raise HTTPException(
+                    status_code=429,
+                    detail="尝试次数过多，请稍后再试",
+                    headers={"Retry-After": str(retry_after)},
+                )
         try:
             user = await asyncio.to_thread(
                 authenticate, settings, payload.username, payload.password
@@ -42,7 +54,11 @@ def build_router(settings: Settings) -> APIRouter:
                 status_code=503, detail="登录服务暂不可用，请稍后重试"
             ) from exc
         if user is None:
+            if lock_enabled:
+                limiter.register_failure(lock_key)
             raise HTTPException(status_code=401, detail="用户名或密码错误")
+        if lock_enabled:
+            limiter.clear_failures(lock_key)
         token, expires_in = auth_tokens.issue(user)
         return LoginResponse(
             token=token,

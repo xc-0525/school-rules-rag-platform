@@ -153,7 +153,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             )
         return await call_next(request)
 
-    app.include_router(build_auth_router(settings))
+    app.include_router(build_auth_router(settings, limiter=limiter))
     app.include_router(build_router(services, settings, nodes, entry, limiter=limiter))
     app.include_router(build_conversations_router(services, settings))
     app.include_router(build_documents_router(services, settings))

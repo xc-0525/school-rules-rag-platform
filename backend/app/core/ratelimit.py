@@ -37,6 +37,10 @@ class RateLimiter:
         self._hits: dict[str, deque[float]] = defaultdict(deque)
         self._daily: dict[str, tuple[str, int]] = {}
         self._inflight: dict[str, int] = defaultdict(int)
+        # P1-1：登录失败锁定（按"用户名"全局计数，防换 IP/分布式绕过；
+        # 与分钟限流相互独立——分钟限流管频率，失败锁定管"针对单账号的爆破"）
+        self._fails: dict[str, deque[float]] = defaultdict(deque)
+        self._locked_until: dict[str, float] = {}
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ 分钟级
@@ -70,6 +74,41 @@ class RateLimiter:
             self._daily[key] = (day, count + 1)
             return True, 0
 
+    # ------------------------------------------------- 登录失败锁定（P1-1）
+    def is_locked(self, key: str) -> tuple[bool, int]:
+        """只读检查：key 是否处于锁定状态；返回 (是否锁定, 剩余秒数)。"""
+        now = time.time()
+        with self._lock:
+            until = self._locked_until.get(key, 0.0)
+            if until > now:
+                return True, int(until - now) + 1
+            return False, 0
+
+    def register_failure(
+        self, key: str, threshold: int = 5, window_seconds: int = 300
+    ) -> tuple[bool, int]:
+        """登记一次登录失败；窗口内累计达到 threshold 次即锁定。
+
+        锁定期间 is_locked 返回 True；锁定到期后计数自动清零重新累计。
+        """
+        now = time.time()
+        with self._lock:
+            bucket = self._fails[key]
+            while bucket and bucket[0] <= now - window_seconds:
+                bucket.popleft()
+            bucket.append(now)
+            if len(bucket) >= threshold:
+                self._locked_until[key] = now + window_seconds
+                self._fails.pop(key, None)
+                return True, window_seconds
+            return False, 0
+
+    def clear_failures(self, key: str) -> None:
+        """登录成功后调用：清空失败计数（锁定状态也一并解除）。"""
+        with self._lock:
+            self._fails.pop(key, None)
+            self._locked_until.pop(key, None)
+
     # ------------------------------------------------------------------ 并发闸门
     def acquire(self, key: str) -> bool:
         if self.concurrent <= 0:
@@ -99,3 +138,5 @@ class RateLimiter:
             self._hits.clear()
             self._daily.clear()
             self._inflight.clear()
+            self._fails.clear()
+            self._locked_until.clear()
