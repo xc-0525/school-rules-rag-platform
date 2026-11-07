@@ -15,8 +15,8 @@ from app.services.auth import (
     RegistrationError,
     auth_tokens,
     authenticate,
+    build_current_user_dependency,
     register_user,
-    require_user,
 )
 
 logger = logging.getLogger("app.api.auth")
@@ -95,7 +95,8 @@ def build_router(settings: Settings) -> APIRouter:
         response_model=UserInfo,
         summary="当前登录用户（用于前端校验 token 是否有效）",
     )
-    async def me(user: AuthUser = Depends(require_user)):
+    async def me(user: AuthUser = Depends(build_current_user_dependency(settings))):
+        # P0-3：改走 current_user 依赖链，接入 60s 缓存的账号活性检查
         return UserInfo(
             id=user.id, username=user.username, nickname=user.nickname, role=user.role
         )

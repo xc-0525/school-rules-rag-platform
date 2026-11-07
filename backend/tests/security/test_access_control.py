@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -173,6 +174,94 @@ class IdorTests(unittest.TestCase):
         admin = {"Authorization": f"Bearer {token_for(1, 'admin', 'admin')}"}
         response = self.client.get("/api/v1/conversations/42", headers=admin)
         self.assertIn(response.status_code, (403, 404))
+
+
+class _FakeResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
+class _FakeSession:
+    def __init__(self, value):
+        self._value = value
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, *args, **kwargs):
+        return _FakeResult(self._value)
+
+
+class TokenStateTests(unittest.TestCase):
+    """P0-3：用户级 token 吊销 + 60s 缓存的账号活性检查。"""
+
+    def setUp(self) -> None:
+        from app.services import auth as auth_module
+
+        self.auth_module = auth_module
+        auth_module._active_cache.clear()
+
+    def test_revoke_all_for_user_kills_old_tokens_only(self) -> None:
+        import time
+
+        store = AuthTokenStore(secret=b"sec-audit-tokenstate", ttl=3600)
+        old = store.issue(AuthUser(id=9, username="u9", nickname="u9", role="student"))[0]
+        self.assertIsNotNone(store.resolve(old))
+        store.revoke_all_for_user(9)
+        self.assertIsNone(store.resolve(old), "吊销后旧 token 必须失效")
+        time.sleep(1.05)  # iat 秒级精度：跨过吊销秒后再签发新 token
+        fresh = store.issue(AuthUser(id=9, username="u9", nickname="u9", role="student"))[0]
+        self.assertIsNotNone(store.resolve(fresh), "重新登录签发的 token 必须可用")
+        untouched = store.issue(AuthUser(id=10, username="u10", nickname="u10", role="student"))[0]
+        self.assertIsNotNone(store.resolve(untouched), "不得波及其他用户")
+
+    def test_disabled_user_rejected_and_check_is_cached(self) -> None:
+        import app.db.session as db_session
+
+        settings = Settings(
+            llm_mode="fake",
+            vector_mode="mock",
+            graph_mode="mock",
+            auth_required=True,
+            dev_mode=False,
+            mysql_url="mysql+pymysql://sec:pw@127.0.0.1:3306/db",
+        )
+        client, _ = build(settings)
+        headers = {"Authorization": f"Bearer {token_for(77, 'victim', 'student')}"}
+        calls = {"n": 0}
+
+        def fake_new_session_active(url):
+            calls["n"] += 1
+            return _FakeSession(1)
+
+        with unittest.mock.patch.object(db_session, "new_session", fake_new_session_active):
+            ok = client.get("/api/v1/auth/me", headers=headers)
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(calls["n"], 1)
+        with unittest.mock.patch.object(db_session, "new_session", fake_new_session_active):
+            ok2 = client.get("/api/v1/auth/me", headers=headers)
+        self.assertEqual(ok2.status_code, 200)
+        self.assertEqual(calls["n"], 1, "60s 缓存窗口内不应重复查库")
+
+        self.auth_module._active_cache.clear()  # 模拟缓存过期
+        with unittest.mock.patch.object(
+            db_session, "new_session", lambda url: _FakeSession(0)
+        ):
+            denied = client.get("/api/v1/auth/me", headers=headers)
+        self.assertEqual(denied.status_code, 401, denied.text)
+        self.assertIn("禁用", denied.json()["detail"])
+
+    def test_mock_mode_skips_active_check(self) -> None:
+        client, _ = build(dev_settings())
+        headers = {"Authorization": f"Bearer {token_for(5, 'stu5', 'student')}"}
+        response = client.get("/api/v1/auth/me", headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
 
 
 class UploadPathSafetyTests(unittest.TestCase):

@@ -132,6 +132,9 @@ class AuthTokenStore:
         self._secret = secret or _SECRET
         self._ttl = ttl
         self._revoked: dict[str, float] = {}
+        # P0-3：用户级吊销截止（int 秒）。禁用/改密/降权后调用 revoke_all_for_user，
+        # 该用户所有 iat <= 截止值的 token 一并失效——不再依赖"等 token 自然过期"。
+        self._user_cutoffs: dict[int, int] = {}
         self._lock = threading.Lock()
 
     def issue(self, user: AuthUser) -> tuple[str, int]:
@@ -168,10 +171,16 @@ class AuthTokenStore:
             return None
         if expires_at < time.time():
             return None
+        issued_at = int(payload.get("iat") or 0)
         jti = str(payload.get("jti") or "")
         with self._lock:
             self._purge_locked()
             if jti and jti in self._revoked:
+                return None
+            # P0-3：iat <= 用户吊销截止的 token 一律拒绝（同秒签发的也拒绝，
+            # 最坏情况是用户重新登录一次，换取"禁用即生效"的确定性）
+            cutoff = self._user_cutoffs.get(user_id)
+            if cutoff is not None and issued_at <= cutoff:
                 return None
         return AuthUser(
             id=user_id,
@@ -194,6 +203,15 @@ class AuthTokenStore:
             return
         with self._lock:
             self._revoked[jti] = float(payload.get("exp") or (time.time() + self._ttl))
+
+    def revoke_all_for_user(self, user_id: int) -> None:
+        """P0-3：禁用/改密/降权后调用，该用户所有更早签发的 token 整批失效。
+
+        多 worker 场景仍按实例生效（与 jti 吊销表同 limitation）；跨实例
+        精确失效需把 _user_cutoffs 换成 Redis（接口不变可直接替换）。
+        """
+        with self._lock:
+            self._user_cutoffs[int(user_id)] = int(time.time())
 
     def _purge_locked(self) -> None:
         now = time.time()
@@ -425,6 +443,40 @@ def require_user(authorization: str | None = Header(default=None, alias="Authori
     return user
 
 
+# ---------------------------------------------------------------------------
+# 用户状态活性检查（P0-3）：token 签名有效 ≠ 账号仍可用
+# ---------------------------------------------------------------------------
+# 60s 缓存的 users.status 查询：被禁用账号最迟 1 分钟被 401。
+# DB 抖动时按可用处理（不放大成全员掉线），异常只进日志。
+_ACTIVE_CHECK_TTL_SECONDS = 60.0
+_active_cache: dict[int, tuple[float, bool]] = {}
+
+
+def _user_active(settings: Settings, user_id: int) -> bool:
+    if not settings.mysql_url:
+        return True  # Mock 模式无用户表，跳过
+    now = time.time()
+    cached = _active_cache.get(user_id)
+    if cached and now - cached[0] < _ACTIVE_CHECK_TTL_SECONDS:
+        return cached[1]
+    try:
+        from sqlalchemy import select
+
+        from app.db.models import User
+        from app.db.session import new_session
+
+        with new_session(settings.mysql_url) as session:
+            status = session.execute(
+                select(User.status).where(User.id == user_id)
+            ).scalar_one_or_none()
+        active = status is not None and int(status) == 1
+    except Exception:  # noqa: BLE001
+        logger.exception("用户状态检查失败 user_id=%s，按可用处理", user_id)
+        active = True
+    _active_cache[user_id] = (now, active)
+    return active
+
+
 def build_current_user_dependency(settings: Settings):
     """按配置生成"当前用户"依赖。
 
@@ -442,6 +494,8 @@ def build_current_user_dependency(settings: Settings):
         if token and user is None:
             raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
         if user is not None:
+            if not _user_active(settings, user.id):
+                raise HTTPException(status_code=401, detail="账号已被禁用，请联系管理员")
             return user
         if settings.dev_mode:
             return anonymous_user(settings)
