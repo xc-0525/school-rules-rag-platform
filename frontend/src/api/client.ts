@@ -15,6 +15,7 @@ import type {
   NoticeCategoryOption,
   NoticeItem,
   OcrStatus,
+  OverviewData,
   RepairItem,
   ReservationItem,
   TicketItem,
@@ -236,6 +237,11 @@ export function markUnmatched(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
+}
+
+// ---------------- 运营看板（N-24） ----------------
+export function fetchOverview(days = 7): Promise<OverviewData> {
+  return request<OverviewData>(`/api/v1/admin/stats/overview?days=${days}`)
 }
 
 // ---------------- 校园公告 ----------------

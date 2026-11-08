@@ -437,3 +437,42 @@ export interface UnmatchedPage {
   total: number
 }
 
+// ---------------- 运营看板（N-24） ----------------
+
+export interface TrendPoint {
+  date: string
+  questions: number
+  refused: number
+}
+
+export interface OverviewData {
+  generated_at: string
+  days: number
+  scale: {
+    questions: number
+    prev_questions: number
+    delta_rate: number | null
+    active_users: number
+    conversations: number
+    avg_questions_per_conversation: number
+  }
+  quality: {
+    answers: number
+    refused: number
+    refusal_rate: number
+    feedback_total: number
+    likes: number
+    dislikes: number
+    like_rate: number
+  }
+  efficiency: {
+    p50_ms: number
+    p95_ms: number
+    tool_calls: number
+    tool_success_rate: number
+  }
+  trend: TrendPoint[]
+  top_unmatched: Array<{ query_text: string; count: number; last_seen: string | null }>
+  low_rated: Array<{ id: number; question: string | null; comment: string | null; created_at: string | null }>
+}
+

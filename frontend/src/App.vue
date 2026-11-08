@@ -34,6 +34,10 @@
         </el-menu-item>
 
         <li class="menu-group">系统</li>
+        <el-menu-item v-if="auth.isAdmin" index="/admin/dashboard">
+          <el-icon><DataAnalysis /></el-icon>
+          <span>运营看板</span>
+        </el-menu-item>
         <el-menu-item v-if="auth.isAdmin" index="/admin/tickets">
           <el-icon><Tickets /></el-icon>
           <span>工单处理</span>
@@ -111,6 +115,7 @@ import {
   ChatDotRound,
   ChatLineSquare,
   Clock,
+  DataAnalysis,
   Document,
   InfoFilled,
   Suitcase,
