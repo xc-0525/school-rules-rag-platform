@@ -137,8 +137,14 @@ async def retrieve_vector(state: AgentState, ctx: NodeContext) -> dict[str, Any]
     return {"vector_hits": filter_evidence(hits, level, limit=3)}
 
 async def retrieve_graph(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
-    paths = await ctx.services.graph.search_paths(_search_text(state), top_k=2)
-    return {"graph_paths": paths}
+    # N-20：图谱证据的 title 含文档名（"知识图谱 · 03-...本科.md"），同样按学历过滤；
+    # Mock 图谱标题不含文档名 → 判定为通用，不会被误删。
+    from app.services.profile import filter_evidence
+
+    level = state.user_education or "unset"
+    top_k = 4 if level in ("undergraduate", "junior") else 2
+    paths = await ctx.services.graph.search_paths(_search_text(state), top_k=top_k)
+    return {"graph_paths": filter_evidence(paths, level, limit=2)}
 
 async def check_sufficiency(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     """判断召回条款是否真的能回答问题（拒答判定的核心）。
