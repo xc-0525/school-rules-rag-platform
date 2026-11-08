@@ -6,6 +6,8 @@ import type {
   ConversationDetail,
   ConversationPage,
   DocumentItem,
+  FeedbackItem,
+  FeedbackPage,
   HealthInfo,
   LocationItem,
   LoginResponse,
@@ -17,6 +19,7 @@ import type {
   ReservationItem,
   TicketItem,
   TicketPage,
+  UnmatchedPage,
   UploadedImage,
   UploadResult,
   UserInfo,
@@ -170,6 +173,68 @@ export function transitionTicket(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, remark }),
+  })
+}
+
+// ---------------- 反馈与未命中工作台（N-25） ----------------
+export interface FeedbackQuery {
+  rating?: number
+  status?: string
+  keyword?: string
+  limit?: number
+  offset?: number
+}
+
+export function fetchAdminFeedback(query: FeedbackQuery = {}): Promise<FeedbackPage> {
+  const params = new URLSearchParams()
+  if (query.rating) params.set('rating', String(query.rating))
+  if (query.status) params.set('status', query.status)
+  if (query.keyword) params.set('keyword', query.keyword)
+  if (query.limit) params.set('limit', String(query.limit))
+  if (query.offset) params.set('offset', String(query.offset))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return request<FeedbackPage>(`/api/v1/admin/feedback${suffix}`)
+}
+
+export function transitionFeedback(
+  id: number,
+  action: 'attribute' | 'resolve' | 'verify',
+  payload: { attribution?: string; remark?: string } = {},
+): Promise<FeedbackItem> {
+  return request<FeedbackItem>(`/api/v1/admin/feedback/${id}/transition`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...payload }),
+  })
+}
+
+export interface UnmatchedQuery {
+  days?: number
+  status?: string
+  keyword?: string
+  limit?: number
+  offset?: number
+}
+
+export function fetchUnmatched(query: UnmatchedQuery = {}): Promise<UnmatchedPage> {
+  const params = new URLSearchParams()
+  if (query.days) params.set('days', String(query.days))
+  if (query.status) params.set('status', query.status)
+  if (query.keyword) params.set('keyword', query.keyword)
+  if (query.limit) params.set('limit', String(query.limit))
+  if (query.offset) params.set('offset', String(query.offset))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return request<UnmatchedPage>(`/api/v1/admin/unmatched${suffix}`)
+}
+
+export function markUnmatched(
+  queryHash: string,
+  payload: { status: 'pending' | 'ignored' | 'resolved'; remark?: string; query_text?: string },
+): Promise<{ query_hash: string; status: string; status_label: string; remark: string | null }> {
+  return request(`/api/v1/admin/unmatched/${queryHash}/mark`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   })
 }
 

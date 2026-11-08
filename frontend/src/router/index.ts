@@ -55,6 +55,12 @@ const router = createRouter({
       meta: { title: '工单处理', requiresAdmin: true },
     },
     {
+      path: '/admin/feedback',
+      name: 'admin-feedback',
+      component: () => import('../views/FeedbackAdminView.vue'),
+      meta: { title: '反馈工作台', requiresAdmin: true },
+    },
+    {
       path: '/about',
       name: 'about',
       component: () => import('../views/AboutView.vue'),

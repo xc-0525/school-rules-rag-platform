@@ -38,6 +38,10 @@
           <el-icon><Tickets /></el-icon>
           <span>工单处理</span>
         </el-menu-item>
+        <el-menu-item v-if="auth.isAdmin" index="/admin/feedback">
+          <el-icon><ChatLineSquare /></el-icon>
+          <span>反馈工作台</span>
+        </el-menu-item>
         <el-menu-item v-if="auth.isAdmin" index="/admin/users">
           <el-icon><UserFilled /></el-icon>
           <span>用户管理</span>
@@ -105,6 +109,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   Bell,
   ChatDotRound,
+  ChatLineSquare,
   Clock,
   Document,
   InfoFilled,

@@ -73,7 +73,27 @@ class Feedback(Base):
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
     rating: Mapped[int] = mapped_column(Integer)
     comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # N-25 反馈工作台：归因 + 处理闭环（迁移见 010_feedback_workbench.sql）
+    attribution: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    handle_status: Mapped[str] = mapped_column(String(16), default="pending")
+    handler_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    handle_remark: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.current_timestamp())
+
+
+class UnmatchedMark(Base):
+    """未命中问题的处理标记（按归一化问题哈希），不存原始问答内容。"""
+
+    __tablename__ = "unmatched_marks"
+
+    query_hash: Mapped[str] = mapped_column(String(40), primary_key=True)
+    query_text: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    remark: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    handler_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Document(Base):

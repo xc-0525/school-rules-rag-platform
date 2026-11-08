@@ -394,3 +394,46 @@ export interface TicketPage {
   total: number
 }
 
+// ---------------- 反馈与未命中工作台（N-25） ----------------
+
+export interface FeedbackItem {
+  id: number
+  message_id: number
+  user_id: number
+  username: string | null
+  rating: number
+  rating_label: string
+  comment: string | null
+  /** 该回答对应的用户提问 */
+  question: string | null
+  answer: string | null
+  attribution: string | null
+  handle_status: 'pending' | 'attributed' | 'resolved' | 'verified'
+  status_label: string
+  handler_id: number | null
+  handled_at: string | null
+  handle_remark: string | null
+  created_at: string | null
+}
+
+export interface FeedbackPage {
+  items: FeedbackItem[]
+  total: number
+}
+
+export interface UnmatchedItem {
+  query_hash: string
+  query_text: string
+  count: number
+  first_seen: string | null
+  last_seen: string | null
+  status: 'pending' | 'ignored' | 'resolved'
+  status_label: string
+  remark: string | null
+}
+
+export interface UnmatchedPage {
+  items: UnmatchedItem[]
+  total: number
+}
+
