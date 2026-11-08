@@ -35,6 +35,7 @@ from app.agents.prompting import (  # noqa: F401
 )
 from app.agents.prompts import (  # noqa: F401
     DEGRADE_NOTE,
+    INSUFFICIENT_EVIDENCE_ANSWER,
     LLM_UNAVAILABLE_ANSWER,
     NO_EVIDENCE_ANSWER,
     STRICT_SYSTEM_PROMPT,
@@ -282,8 +283,10 @@ async def reject_handoff(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
         "meta",
         {"sources": [item.model_dump() for item in fallback], "cached": False, "refused": True},
     )
-    await ctx.delta(NO_EVIDENCE_ANSWER)
-    return {"answer": NO_EVIDENCE_ANSWER, "refused": True, "sources": fallback}
+    # M-05：有"相近条款"和"完全没资料"是两种处境，话术分开
+    text = INSUFFICIENT_EVIDENCE_ANSWER if fallback else NO_EVIDENCE_ANSWER
+    await ctx.delta(text)
+    return {"answer": text, "refused": True, "sources": fallback}
 
 async def degrade_answer(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     await ctx.delta(DEGRADE_NOTE)

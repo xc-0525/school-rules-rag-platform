@@ -63,7 +63,8 @@
         <el-alert type="info" :closable="false" show-icon style="margin-bottom: 14px">
           <template #title>课程答辩演示要点</template>
           <div class="upload-hint">
-            1. Agent 图共 13 节点，含 <b>并行（双路召回）</b>、<b>选择（充分性判定/缓存）</b>、
+            1. Agent 图共 15 个节点（13 个 Agent + 1 个并行容器 + 1 个落库终点），含
+            <b>并行（双路召回）</b>、<b>选择（充分性判定/缓存）</b>、
             <b>循环（查询扩展、引用校验重生成）</b>；<br />
             2. 真实链路：Qdrant 本地嵌入式 + 本地 BGE + Neo4j 图谱 + MySQL 落库 + DeepSeek；<br />
             3. 防幻觉：无证据拒答、引用校验、降级提示；<br />
@@ -79,9 +80,10 @@
 
         <div class="panel-title" style="margin-top: 16px">已知限制</div>
         <div class="about-list muted">
-          <div>· 登录鉴权已上线：学生 / 管理员双角色，文档管理仅管理员可操作</div>
-          <div>· 扫描件 PDF 需另装 OCR 引擎（未安装时上传会提示，文档页可查引擎状态）</div>
-          <div>· 语义缓存实为「问题归一化 + 精确匹配」，不是向量相似度缓存</div>
+          <div>· 语料只覆盖学校公开制度：校医院、校车、快递、停车等主题没有条款，这类问题会拒答而不是猜测</div>
+          <div>· 扫描件 PDF 需另装 OCR 引擎；识别结果建议人工抽查（单页约 8 秒）</div>
+          <div>· 语义缓存是「问题归一化 + 精确匹配」，不是向量相似度缓存</div>
+          <div>· 演示环境只预置 1 个管理员账号；正式使用应至少 2 个，避免单点锁死后无人可管</div>
           <div>· 本地 MySQL 为 5.5.11，建表脚本已做兼容</div>
         </div>
       </div>

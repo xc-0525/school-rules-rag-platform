@@ -15,6 +15,21 @@
           <el-checkbox v-if="auth.isAdmin" v-model="repairAll" @change="loadRepairs">
             查看全部学生报修
           </el-checkbox>
+          <!-- M-11：关键词与楼栋走服务端筛选，历史单多时也能找到 -->
+          <el-input
+            v-model="repairKeyword"
+            clearable
+            placeholder="搜索标题或描述"
+            style="width: 170px"
+            @input="onRepairFilter"
+          />
+          <el-input
+            v-model="repairBuilding"
+            clearable
+            placeholder="楼栋，如 12栋"
+            style="width: 130px"
+            @input="onRepairFilter"
+          />
         </div>
         <el-empty v-if="!repairs.length" description="暂无报修记录" :image-size="80" />
         <div v-for="item in repairs" :key="item.id" class="service-card">
@@ -104,6 +119,31 @@
             <span>{{ showExpired ? '收起已过期' : `显示已过期（${expiredCount}）` }}</span>
           </span>
         </div>
+        <!-- M-17：后端对管理员是 403，这里提前说明，避免点了才报错 -->
+        <el-alert
+          v-if="auth.isAdmin"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 12px"
+          title="管理员账号只用于查看与代取消，不能自行预约（避免占用学生名额）"
+        />
+
+        <!-- M-12：按日期范围查历史预约（服务端过滤） -->
+        <div class="service-toolbar">
+          <el-date-picker
+            v-model="resDateRange"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            unlink-panels
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            style="width: 250px"
+            @change="loadReservations"
+          />
+          <span class="muted" style="font-size: 12px">按预约日期筛选，留空为全部</span>
+        </div>
+
         <div v-if="auth.isAdmin" class="reserve-filter">
           <el-select
             v-model="resFilterUser"
@@ -180,6 +220,14 @@
             <el-radio-button v-if="auth.isAdmin" label="pending">待审核</el-radio-button>
           </el-radio-group>
           <el-button type="primary" @click="openLfDialog">发布申请</el-button>
+          <!-- M-13：标题/描述/地点关键词走服务端 -->
+          <el-input
+            v-model="lfKeyword"
+            clearable
+            placeholder="搜索标题/描述/地点"
+            style="width: 190px"
+            @input="onLostFoundFilter"
+          />
         </div>
         <el-alert
           v-if="lfScope === 'mine' && timedOutItems.length"
@@ -420,6 +468,13 @@ const saving = ref(false)
 // ---------------- 报修 ----------------
 const repairs = ref<RepairItem[]>([])
 const repairAll = ref(false)
+// M-11/M-12/M-13：三个列表的服务端筛选条件（清空即恢复全量）
+const repairKeyword = ref('')
+const repairBuilding = ref('')
+const resDateRange = ref<[string, string] | null>(null)
+const lfKeyword = ref('')
+let repairFilterTimer: ReturnType<typeof setTimeout> | null = null
+let lfFilterTimer: ReturnType<typeof setTimeout> | null = null
 const repairDialog = ref(false)
 const repairForm = ref({ title: '', category: 'other', building: '', room: '', contact: '', description: '' })
 
@@ -447,10 +502,19 @@ const repairStatusType = (s: string) => REPAIR_STATUS[s]?.type ?? 'info'
 
 async function loadRepairs() {
   try {
-    repairs.value = await fetchRepairs()
+    repairs.value = await fetchRepairs('', {
+      keyword: repairKeyword.value.trim(),
+      building: repairBuilding.value.trim(),
+    })
   } catch (error: any) {
     ElMessage.error(`加载报修失败：${error?.message || error}`)
   }
+}
+
+/** 报修筛选防抖：连续输入只发最后一次请求 */
+function onRepairFilter() {
+  if (repairFilterTimer) clearTimeout(repairFilterTimer)
+  repairFilterTimer = setTimeout(loadRepairs, 300)
 }
 
 async function submitRepair() {
@@ -486,12 +550,20 @@ async function actRepair(item: RepairItem, action: 'process' | 'complete' | 'clo
     closeDialog.value = true
     return
   }
-  if (action === 'process') {
+  // M-15：受理与完成都必须写处理说明，学生在状态里能看到
+  if (action === 'process' || action === 'complete') {
+    const verb = action === 'process' ? '受理' : '完成'
+    const tip =
+      action === 'process'
+        ? '受理说明，如「已联系后勤师傅上门」（至少 5 个字）'
+        : '完成说明，如「已更换水龙头并试水正常」（至少 5 个字）'
     try {
-      const { value } = await ElMessageBox.prompt('受理备注（可选，如已派维修师傅）', `受理「${item.title}」`, {
-        inputPlaceholder: '选填',
-      }).catch(() => ({ value: '' }))
-      remark = value || ''
+      const { value } = await ElMessageBox.prompt(tip, `${verb}「${item.title}」`, {
+        inputPlaceholder: '学生在状态里能看到这段说明',
+        inputValidator: (input: string) =>
+          (input || '').trim().length >= 5 ? true : '至少填 5 个字',
+      })
+      remark = (value || '').trim()
     } catch {
       return
     }
@@ -681,7 +753,8 @@ async function book(loc: LocationItem, slot: string) {
 
 async function loadReservations() {
   try {
-    reservations.value = await fetchReservations()
+    const [from, to] = resDateRange.value || ['', '']
+    reservations.value = await fetchReservations({ date_from: from, date_to: to })
   } catch (error: any) {
     ElMessage.error(`加载预约失败：${error?.message || error}`)
   }
@@ -776,14 +849,22 @@ const timedOutItems = computed(() =>
 
 async function loadLostFound() {
   try {
-    lostFound.value = await fetchLostFound(lfScope.value)
+    const keyword = lfKeyword.value.trim()
+    lostFound.value = await fetchLostFound(lfScope.value, '', { keyword })
     if (auth.isAdmin && lfScope.value !== 'pending') {
+      // 待审计数不受关键词影响，始终用全量
       const pending = await fetchLostFound('pending')
       pendingCount.value = pending.length
     }
   } catch (error: any) {
     ElMessage.error(`加载失物招领失败：${error?.message || error}`)
   }
+}
+
+/** 失物筛选防抖 */
+function onLostFoundFilter() {
+  if (lfFilterTimer) clearTimeout(lfFilterTimer)
+  lfFilterTimer = setTimeout(loadLostFound, 300)
 }
 
 function openLfDialog() {

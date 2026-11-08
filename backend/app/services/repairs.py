@@ -283,10 +283,29 @@ def list_repairs(
     is_admin: bool,
     status: str = "",
     limit: int = 50,
+    offset: int = 0,
+    keyword: str = "",
+    building: str = "",
 ) -> list[dict[str, Any]]:
-    """学生看自己的申请，管理员看全部。"""
+    """学生看自己的申请，管理员看全部。
+
+    M-11：新增 offset / keyword / building 三个可选参数，默认值保持原有行为，
+    返回结构仍是 list（不改成 {items,total}），前端与既有调用无需改动。
+    """
     limit = max(1, min(int(limit or 50), 200))
+    offset = max(0, int(offset or 0))
+    keyword = (keyword or "").strip().lower()
+    building = (building or "").strip()
     fetch: Callable[[], list[dict[str, Any]]]
+
+    def _match(row: dict[str, Any]) -> bool:
+        if keyword:
+            haystack = f"{row.get('title', '')} {row.get('description', '')}".lower()
+            if keyword not in haystack:
+                return False
+        if building and building not in str(row.get("building") or ""):
+            return False
+        return True
 
     if not settings.mysql_url:
         with _mock_lock:
@@ -295,9 +314,12 @@ def list_repairs(
                 for r in _mock_repairs
                 if (is_admin or r["user_id"] == user_id)
                 and (not status or r["status"] == status)
+                and _match(r)
             ]
         rows.sort(key=lambda r: (_parse_dt(r["created_at"]) or datetime.min, r["id"]), reverse=True)
-        return [_decorate(r) for r in rows[:limit]]
+        return [_decorate(r) for r in rows[offset : offset + limit]]
+
+    from sqlalchemy import or_
 
     from app.db.models import RepairRequest
     from app.db.session import new_session
@@ -308,9 +330,18 @@ def list_repairs(
             query = query.filter(RepairRequest.user_id == user_id)
         if status:
             query = query.filter(RepairRequest.status == status)
+        # M-11：过滤下推到 SQL，不在应用层捞全表再筛
+        if keyword:
+            like = f"%{keyword}%"
+            query = query.filter(
+                or_(RepairRequest.title.like(like), RepairRequest.description.like(like))
+            )
+        if building:
+            query = query.filter(RepairRequest.building.like(f"%{building}%"))
         rows = (
             query.order_by(RepairRequest.created_at.desc(), RepairRequest.id.desc())
             .limit(limit)
+            .offset(offset)
             .all()
         )
         return [
@@ -406,8 +437,11 @@ def transition_repair(
     spec = allowed_actions[action]
     if spec["admin_only"] and not is_admin:
         raise RepairRuleError("仅管理员可执行该操作")
-    if action == "close" and not remark.strip():
-        raise RepairRuleError("关闭工单必须填写原因")
+    # M-15：process / complete 也要写处理说明——否则学生只看到状态变了，不知道为什么
+    if action in {"process", "complete", "close"} and len(remark.strip()) < 5:
+        raise RepairRuleError(
+            "处理意见至少 5 个字（学生在状态里能看到这段说明）"
+        )
 
     now = datetime.now()
     if not settings.mysql_url:

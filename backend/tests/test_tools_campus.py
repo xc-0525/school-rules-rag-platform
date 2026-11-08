@@ -82,7 +82,7 @@ class CampusToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_repair_tool_status_filter_and_remark(self) -> None:
         created = repair_service.create_repair(self.settings, 1, _repair_payload())
         repair_service.transition_repair(
-            self.settings, created["id"], 9, is_admin=True, action="process", remark="已派师傅"
+            self.settings, created["id"], 9, is_admin=True, action="process", remark="已派师傅上门维修"
         )
         result = await self._run("query_repair_status", {"status": "processing"})
         self.assertEqual(len(result.payload["repairs"]), 1)

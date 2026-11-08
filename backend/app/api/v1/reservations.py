@@ -48,7 +48,10 @@ def build_router(settings: Settings) -> APIRouter:
     @router.get("", response_model=list[ReservationItem], summary="我的预约")
     async def list_my_api(
         status: str = Query(default="", description="reserved/cancelled/fulfilled/no_show"),
+        date_from: str = Query(default="", pattern=r"^$|^\d{4}-\d{2}-\d{2}$", description="起始日期（M-12）"),
+        date_to: str = Query(default="", pattern=r"^$|^\d{4}-\d{2}-\d{2}$", description="结束日期（M-12）"),
         limit: int = Query(default=50, ge=1, le=200),
+        offset: int = Query(default=0, ge=0, description="分页偏移（M-12）"),
         user: AuthUser = Depends(current_user),
     ):
         return await asyncio.to_thread(
@@ -58,6 +61,9 @@ def build_router(settings: Settings) -> APIRouter:
             is_admin=user.is_admin,
             status=status,
             limit=limit,
+            offset=offset,
+            date_from=date_from,
+            date_to=date_to,
         )
 
     @router.post(

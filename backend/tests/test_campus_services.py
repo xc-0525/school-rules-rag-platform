@@ -111,7 +111,7 @@ class RepairServiceTests(unittest.TestCase):
         self.assertEqual(processing["status"], "processing")
         self.assertEqual(processing["handler_id"], 9)
         completed = repair_service.transition_repair(
-            self.settings, rid, 9, is_admin=True, action="complete"
+            self.settings, rid, 9, is_admin=True, action="complete", remark="已更换水龙头并试水正常"
         )
         self.assertEqual(completed["status"], "completed")
         # 终态不能再流转
@@ -136,12 +136,29 @@ class RepairServiceTests(unittest.TestCase):
         self.assertEqual(cancelled["status"], "closed")
         # 已受理的单不能被学生取消
         repair_service.transition_repair(
-            self.settings, b["id"], 9, is_admin=True, action="process"
+            self.settings, b["id"], 9, is_admin=True, action="process", remark="已联系后勤师傅上门"
         )
         with self.assertRaises(repair_service.RepairRuleError):
             repair_service.transition_repair(
                 self.settings, b["id"], 1, is_admin=False, action="cancel"
             )
+
+    def test_process_requires_reason(self) -> None:
+        """M-15：受理后记录进展也必须写处理说明，否则学生只看到状态变了。"""
+        created = repair_service.create_repair(self.settings, 1, _repair_payload())
+        with self.assertRaises(repair_service.RepairRuleError) as ctx:
+            repair_service.transition_repair(
+                self.settings, created["id"], 9, is_admin=True, action="process"
+            )
+        self.assertIn("处理意见", str(ctx.exception))
+        with self.assertRaises(repair_service.RepairRuleError):
+            repair_service.transition_repair(
+                self.settings, created["id"], 9, is_admin=True, action="process", remark="好"
+            )
+        ok = repair_service.transition_repair(
+            self.settings, created["id"], 9, is_admin=True, action="process", remark="已联系后勤师傅"
+        )
+        self.assertEqual(ok["status"], "processing")
 
     def test_close_requires_reason(self) -> None:
         created = repair_service.create_repair(self.settings, 1, _repair_payload())
@@ -484,7 +501,7 @@ class CampusApiTests(unittest.TestCase):
         self.assertEqual(deny.status_code, 400)
         accept = client.post(
             f"/api/v1/repairs/{created.json()['id']}/transition",
-            json={"action": "process", "remark": "已派单"},
+            json={"action": "process", "remark": "已派单给后勤师傅"},
             headers=admin,
         )
         self.assertEqual(accept.status_code, 200)

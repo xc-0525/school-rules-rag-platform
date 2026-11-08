@@ -192,6 +192,7 @@ def create_item(
             _mock_items.append(row)
             return _decorate(dict(row))
 
+
     from app.db.models import LostFoundItem
     from app.db.session import new_session
 
@@ -221,18 +222,37 @@ def list_items(
     scope: str = "public",
     older_than_hours: int = 0,
     limit: int = 50,
+    offset: int = 0,
+    keyword: str = "",
 ) -> list[dict[str, Any]]:
-    """scope：public=已发布（学生可见）/ mine=我的（含待审与驳回理由）/ pending=待审（管理员）。"""
+    """scope：public=已发布（学生可见）/ mine=我的（含待审与驳回理由）/ pending=待审（管理员）。
+
+    M-13：新增 offset / keyword，默认值保持原有行为，返回结构仍是 list。
+    """
     limit = max(1, min(int(limit or 50), 200))
+    offset = max(0, int(offset or 0))
+    keyword = (keyword or "").strip().lower()
+
+    def _keyword_match(row: dict[str, Any]) -> bool:
+        if not keyword:
+            return True
+        haystack = " ".join(
+            str(row.get(field) or "") for field in ("title", "description", "location")
+        ).lower()
+        return keyword in haystack
+
     if not settings.mysql_url:
         with _mock_lock:
             rows = [
                 dict(r)
                 for r in _mock_items
                 if _match_scope(r, user_id, is_admin, scope, kind, older_than_hours)
+                and _keyword_match(r)
             ]
         rows.sort(key=lambda r: (_parse_dt(r["created_at"]) or datetime.min, r["id"]), reverse=True)
-        return [_decorate(r) for r in rows[:limit]]
+        return [_decorate(r) for r in rows[offset : offset + limit]]
+
+    from sqlalchemy import or_
 
     from app.db.models import LostFoundItem
     from app.db.session import new_session
@@ -250,9 +270,20 @@ def list_items(
             query = query.filter(LostFoundItem.status.in_(PUBLIC_STATUSES))
         if kind:
             query = query.filter(LostFoundItem.kind == kind)
+        # M-13：关键词匹配标题/描述/地点，过滤下推到 SQL
+        if keyword:
+            like = f"%{keyword}%"
+            query = query.filter(
+                or_(
+                    LostFoundItem.title.like(like),
+                    LostFoundItem.description.like(like),
+                    LostFoundItem.location.like(like),
+                )
+            )
         rows = (
             query.order_by(LostFoundItem.created_at.desc(), LostFoundItem.id.desc())
             .limit(limit)
+            .offset(offset)
             .all()
         )
         return [

@@ -28,7 +28,10 @@ def build_router(settings: Settings) -> APIRouter:
     @router.get("/repairs", response_model=list[RepairItem], summary="报修列表（学生=本人）")
     async def list_repairs_api(
         status: str = Query(default="", description="状态过滤：pending/processing/completed/closed"),
+        keyword: str = Query(default="", description="标题/描述关键词（M-11）"),
+        building: str = Query(default="", description="楼栋筛选，如 12栋（M-11）"),
         limit: int = Query(default=50, ge=1, le=200),
+        offset: int = Query(default=0, ge=0, description="分页偏移（M-11）"),
         user: AuthUser = Depends(current_user),
     ):
         return await asyncio.to_thread(
@@ -38,6 +41,9 @@ def build_router(settings: Settings) -> APIRouter:
             is_admin=user.is_admin,
             status=status,
             limit=limit,
+            offset=offset,
+            keyword=keyword,
+            building=building,
         )
 
     @router.post(

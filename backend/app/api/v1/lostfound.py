@@ -52,7 +52,9 @@ def build_router(settings: Settings) -> APIRouter:
             default="public", description="public=已发布 / mine=我的全部 / pending=待审（管理员）"
         ),
         older_than_hours: int = Query(default=0, ge=0, description="待审超过 N 小时（审批超时查询）"),
+        keyword: str = Query(default="", description="标题/描述/地点关键词（M-13）"),
         limit: int = Query(default=50, ge=1, le=200),
+        offset: int = Query(default=0, ge=0, description="分页偏移（M-13）"),
         user: AuthUser = Depends(current_user),
     ):
         if scope == "pending" and not user.is_admin:
@@ -65,7 +67,9 @@ def build_router(settings: Settings) -> APIRouter:
             kind=kind,
             scope=scope,
             older_than_hours=older_than_hours,
+            keyword=keyword,
             limit=limit,
+            offset=offset,
         )
 
     @router.post(

@@ -120,6 +120,9 @@ export interface Message {
   llmFailed?: boolean
   /** 拒答时的判定依据（"条款未提及…"），用于向用户解释为什么答不了 */
   sufficiencyReason?: string
+  /** M-04：引用校验结果，答案底部展示"引用已核对/未通过/工具直答" */
+  groundingStatus?: 'verified' | 'unverified' | 'skipped' | ''
+  groundingReason?: string
   latency_ms?: number
   trace?: TraceEvent[]
   runtime?: RuntimeInfo

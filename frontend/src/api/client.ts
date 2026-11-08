@@ -261,8 +261,19 @@ export function createRepair(payload: Record<string, unknown>): Promise<RepairIt
   })
 }
 
-export function fetchRepairs(status = ''): Promise<RepairItem[]> {
-  return request<RepairItem[]>(`/api/v1/repairs${status ? `?status=${status}` : ''}`)
+export function fetchRepairs(
+  status = '',
+  opts: { keyword?: string; building?: string; limit?: number; offset?: number } = {},
+): Promise<RepairItem[]> {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  // M-11：关键词/楼栋/分页都是可选参数，不传时行为与旧版完全一致
+  if (opts.keyword) params.set('keyword', opts.keyword)
+  if (opts.building) params.set('building', opts.building)
+  if (opts.limit) params.set('limit', String(opts.limit))
+  if (opts.offset) params.set('offset', String(opts.offset))
+  const query = params.toString()
+  return request<RepairItem[]>(`/api/v1/repairs${query ? `?${query}` : ''}`)
 }
 
 export function transitionRepair(
@@ -287,8 +298,17 @@ export function fetchAvailability(locationId: number, date: string): Promise<Ava
   )
 }
 
-export function fetchReservations(): Promise<ReservationItem[]> {
-  return request<ReservationItem[]>('/api/v1/reservations')
+export function fetchReservations(
+  opts: { date_from?: string; date_to?: string; limit?: number; offset?: number } = {},
+): Promise<ReservationItem[]> {
+  const params = new URLSearchParams()
+  // M-12：日期范围与分页可选，不传时行为与旧版一致
+  if (opts.date_from) params.set('date_from', opts.date_from)
+  if (opts.date_to) params.set('date_to', opts.date_to)
+  if (opts.limit) params.set('limit', String(opts.limit))
+  if (opts.offset) params.set('offset', String(opts.offset))
+  const query = params.toString()
+  return request<ReservationItem[]>(`/api/v1/reservations${query ? `?${query}` : ''}`)
 }
 
 export function createReservation(payload: {
@@ -315,9 +335,17 @@ export function transitionReservation(
   })
 }
 
-export function fetchLostFound(scope = 'public', kind = ''): Promise<LostFoundItem[]> {
+export function fetchLostFound(
+  scope = 'public',
+  kind = '',
+  opts: { keyword?: string; limit?: number; offset?: number } = {},
+): Promise<LostFoundItem[]> {
   const params = new URLSearchParams({ scope })
   if (kind) params.set('kind', kind)
+  // M-13：关键词与分页可选
+  if (opts.keyword) params.set('keyword', opts.keyword)
+  if (opts.limit) params.set('limit', String(opts.limit))
+  if (opts.offset) params.set('offset', String(opts.offset))
   return request<LostFoundItem[]>(`/api/v1/lost-found?${params}`)
 }
 

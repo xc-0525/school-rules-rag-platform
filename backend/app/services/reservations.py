@@ -412,8 +412,21 @@ def list_reservations(
     is_admin: bool,
     status: str = "",
     limit: int = 50,
+    offset: int = 0,
+    date_from: str = "",
+    date_to: str = "",
 ) -> list[dict[str, Any]]:
-    return _list_reservations(settings, user_id=user_id, is_admin=is_admin, status=status, limit=limit)
+    """M-12：透传 offset / date_from / date_to，默认值保持原有调用行为。"""
+    return _list_reservations(
+        settings,
+        user_id=user_id,
+        is_admin=is_admin,
+        status=status,
+        limit=limit,
+        offset=offset,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 def _list_reservations(
@@ -424,8 +437,24 @@ def _list_reservations(
     status: str = "",
     limit: int = 200,
     all_users: bool = False,
+    offset: int = 0,
+    date_from: str = "",
+    date_to: str = "",
 ) -> list[dict[str, Any]]:
+    """M-12：新增 offset / date_from / date_to，默认值保持原有行为，返回结构仍为 list。"""
     limit = max(1, min(int(limit or 50), 200))
+    offset = max(0, int(offset or 0))
+    date_from = (date_from or "").strip()
+    date_to = (date_to or "").strip()
+
+    def _in_range(value: Any) -> bool:
+        text = str(value or "")
+        if date_from and text < date_from:
+            return False
+        if date_to and text > date_to:
+            return False
+        return True
+
     if not settings.mysql_url:
         seed_mock_locations()
         with _mock_lock:
@@ -434,10 +463,12 @@ def _list_reservations(
                 for r in _mock_reservations
                 if (all_users or is_admin or r["user_id"] == user_id)
                 and (not status or r["status"] == status)
+                and _in_range(r.get("res_date"))
             ]
+        rows.sort(key=lambda r: (str(r.get("res_date") or ""), int(r.get("id") or 0)), reverse=True)
         return [
             _decorate_reservation(r, _mock_location_by_id(r["location_id"]))
-            for r in rows[:limit]
+            for r in rows[offset : offset + limit]
         ]
 
     from app.db.models import LocationReservation, ReservableLocation, User
@@ -453,9 +484,15 @@ def _list_reservations(
             query = query.filter(LocationReservation.user_id == user_id)
         if status:
             query = query.filter(LocationReservation.status == status)
+        # M-12：日期范围过滤下推到 SQL；格式已由 API 层 pattern 校验
+        if date_from:
+            query = query.filter(LocationReservation.res_date >= date_from)
+        if date_to:
+            query = query.filter(LocationReservation.res_date <= date_to)
         rows = (
             query.order_by(LocationReservation.id.desc())
             .limit(limit)
+            .offset(offset)
             .all()
         )
         return [

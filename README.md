@@ -66,7 +66,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
 > 实际演示用 `start_backend.ps1` 时会自动设置 `AUTH_REQUIRED=1`（所有业务接口需带 Bearer token）。
-> 当前测试：**86 项自动化测试全过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆 + 审查整改/融合闸门/工单确认回归）；
+> 当前测试：**308 项自动化用例，307 项通过、1 项按环境跳过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆 + 审查整改/融合闸门/工单确认 + 用户管理 + 列表筛选 + 密码策略/日志脱敏）；
 > 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
 > 本轮已修复：降级答案不再进缓存、文档上传/删除后清空缓存、上传前预检 Neo4j 并在失败时回滚半成品、
 > 图谱标题引用校验误判、启动脚本固定全局 Python。
@@ -82,7 +82,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
    "模型不可用"提示文案，**提问记录仍按用户落库**（会话历史可查），响应里 `llm_failed=true`、
    `degraded=true`；前端在该条消息上显示"模型不可用"标签。填好 Key 重启后即可正常生成。
 4. **登录令牌**：已改为无状态签名令牌（HMAC-SHA256，标准库实现，不引入新依赖），
-   配置 `AUTH_TOKEN_SECRET` 后重启/多 worker 仍然有效；**未配置时密钥为进程内随机值**，
+   token 为 **HMAC-SHA256 无状态签名**（标准库实现，不依赖 PyJWT）；配置 `AUTH_TOKEN_SECRET` 后重启/多 worker 仍有效，**未配置时密钥为进程内随机值**，
    重启即失效（会在启动日志中告警）。登出用 jti 吊销表，多 worker 下按实例生效。
    仍未实现刷新令牌；注册未做邮箱验证/验证码/审核，适合课程演示，不适合直接公开上线；
    **鉴权默认开启**（`AUTH_REQUIRED=1`）：匿名只在显式 `DEV_MODE=1` 时放行，
@@ -592,7 +592,7 @@ school-rules-rag-platform/
 │   │   ├── services/        #   LLM / Qdrant+BGE / Neo4j / MySQL / 语义缓存适配器
 │   │   ├── db/              #   SQLAlchemy 模型与引擎
 │   │   └── schemas/         #   Pydantic 模型
-│   ├── tests/               # ✅ 86 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 鉴权/注册 + Tool/Memory + 缓存/引用/OCR 回归）
+│   ├── tests/               # ✅ 308 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 鉴权/注册 + Tool/Memory + 缓存/引用/OCR + 筛选/密码策略回归）
 │   ├── scripts/
 │   │   ├── ingest_rules.py  # ✅ 校规文档入库（MySQL + Qdrant + Neo4j）
 │   │   ├── fetch_rules.py   # ✅ 抓取官网校规并清洗成可入库 Markdown
@@ -642,7 +642,7 @@ school-rules-rag-platform/
   灰区才调模型（`SUFFICIENCY_JUDGE=auto`）。真实 24 题：拒答准确率 **0.833 → 1.000**、引用通过率 0.917 → 1.000，
   p50 3.87→3.89s、p95 5.35→5.70s。背景：可答题最低向量分 0.567 与应拒答题最高 0.620 **区间重叠**，
   单靠阈值必然同时误杀和漏放
-- **工单二次确认**：Agent 只生成草稿，用户在前端点"确认提交"后才通过 `POST /api/v1/tickets` 落库，同参数幂等
+- **工单二次确认**：Agent 的 `create_ticket` 一**律只生成草稿**（不再有"意图命中即落库"分支），用户点"确认提交"后才通过 `POST /api/v1/tickets` 落库，同参数幂等；投诉/报修意图已分开（报修走 `create_repair_draft`）
 - **上传链路去 base64（P2-11）**：新增 `upload-raw` 原始字节流通道，边收边落盘、累计超限即时 413 并清理半成品；前端不再 `FileReader → base64`（20MB PDF 峰值内存从约 100MB 降到约 1 倍文件大小）
 - **请求级 trace_id**：响应头回显 `X-Request-ID`，并写入每条应用日志与 `done` 事件，排查一次问答只需一个 id
 - **前端可取消**：切页/开新对话时中止 SSE 请求（`AbortController`），后端同时取消在途图执行，不白烧 token
@@ -660,9 +660,14 @@ school-rules-rag-platform/
   - PDF 文字版上传（base64）+ 扫描件 OCR 自动识别（已实测：单页约 8 秒，含「第N条」归一化）；
   - **Vue3 + Vite 前端**：登录页、SSE 流式问答、Agent 轨迹面板、来源引用、点赞点踩、会话历史、文档管理；
   - **登录鉴权 + 学生自助注册**：admin/student 演示账号、学生注册后自动登录、Bearer token、按用户隔离会话、管理员才能上传/删除文档；
+  - **校园服务**：寝室报修 / 图书馆预约（按时段容量占位，余量实时显示）/ 失物招领（先审后发，驳回须选原因）/ 校园公告；
+  - **用户管理（仅管理员）**：用户分页检索、改昵称/角色/状态、重置密码；改密或降权后旧 token 立即失效，
+    并有防自锁护栏（不能改自己的角色与状态、不能把最后一个可用管理员降级）；
+  - **Agent 能力**：日期锚定（跨天追问不再算错"明天"）、取消/预约草稿续办、办理意图确定性兜底、
+    语义缓存按用户隔离、拒答话术分场景、引用校验状态可见；
   - **本轮回归修复**：降级答案不进缓存、上传/删除后清空缓存、上传前 Neo4j 预检 + 失败回滚、
     图谱证据标题引用校验、启动脚本固定全局 Python、Neo4j driver 复用、multipart 路由 OpenAPI 修复；
-  - 46 项自动化测试全过
+  - 308 项自动化测试（307 通过、1 项按环境跳过）
 
 ### 🚧 进行中
 
@@ -671,8 +676,8 @@ school-rules-rag-platform/
 
 ### 📋 后续计划
 
-- JWT / 刷新令牌与更细的角色权限（当前为进程内 token + 管理员/学生两级）
-- 证据约束生成评测（命中率、拒答准确率、响应延迟）
+- 刷新令牌与更细的业务角色（当前为 HMAC 无状态 token + 管理员/学生两级，已支持管理员改角色/状态/重置密码）
+- 工单处理台（当前学生可提交、管理员可看，但流转与处理意见尚未落到界面）
 - 真正的问题语义缓存（embedding 相似度，当前是归一化精确匹配）
 - 文档管理后台、标签、公告模块
 - 真实校规文档替换 `rules/` 样例并重新入库

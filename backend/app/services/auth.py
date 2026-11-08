@@ -364,10 +364,13 @@ def register_user(
         raise RegistrationError(403, "当前未开放注册")
     if not USERNAME_PATTERN.match(username):
         raise RegistrationError(400, "用户名需为 3-20 位字母、数字或下划线")
-    if len(password) < 6:
-        raise RegistrationError(400, "密码至少 6 位")
-    if len(password) > 128:
-        raise RegistrationError(400, "密码不能超过 128 位")
+    # M-19：统一密码策略（8 位起 + 至少两类字符 + 弱口令黑名单）
+    from app.core.password_policy import PasswordPolicyError, validate_password
+
+    try:
+        validate_password(password)
+    except PasswordPolicyError as exc:
+        raise RegistrationError(400, str(exc)) from exc
     if len(nickname) > 50:
         raise RegistrationError(400, "昵称不能超过 50 个字符")
     if username == (settings.anonymous_username or "anonymous"):

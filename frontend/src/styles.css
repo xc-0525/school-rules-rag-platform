@@ -1757,3 +1757,39 @@ body {
     transform: none;
   }
 }
+
+/* ---------------- 引用校验状态徽标（M-04） ---------------- */
+.grounding-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: #fbfaf7;
+}
+
+.grounding-badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.grounding-badge.is-verified {
+  color: #2f6b46;
+  border-color: rgba(47, 107, 70, 0.28);
+  background: rgba(63, 125, 90, 0.08);
+}
+
+.grounding-badge.is-unverified {
+  color: #8a5a12;
+  border-color: rgba(169, 123, 52, 0.32);
+  background: rgba(169, 123, 52, 0.1);
+}

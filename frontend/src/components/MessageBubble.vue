@@ -46,6 +46,16 @@
         :refused="message.refused"
       />
 
+      <!-- M-04：把引用校验结果显式告诉用户，"可溯源"才算闭环 -->
+      <div
+        v-if="message.role === 'assistant' && groundingBadge"
+        class="grounding-badge"
+        :class="`is-${message.groundingStatus}`"
+        :title="message.groundingReason || ''"
+      >
+        {{ groundingBadge }}
+      </div>
+
       <div
         v-if="message.role === 'assistant' && message.toolDrafts && message.toolDrafts.length"
         class="ticket-draft"
@@ -112,6 +122,14 @@ function confirmDraft(draft: ToolDraft, index: number) {
     confirming.value = false
   })
 }
+
+const GROUNDING_LABELS: Record<string, string> = {
+  verified: '引用已核对',
+  unverified: '引用未通过校验，仅供参考',
+  skipped: '工具直答，未参与引用校验',
+}
+
+const groundingBadge = computed(() => GROUNDING_LABELS[String(props.message.groundingStatus || '')] || '')
 
 /** 卡片标题：每个 action 一种业务语义，不做通用拼串 */
 function draftTitle(draft: ToolDraft): string {

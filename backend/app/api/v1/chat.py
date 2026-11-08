@@ -24,6 +24,7 @@ from app.agents.events import EventBus
 from app.agents.runtime import WorkflowEngine, WorkflowError
 from app.agents.state import AgentState
 from app.core.config import Settings
+from app.core.privacy import mask_pii
 from app.core.request_context import current_request_id
 from app.schemas.chat import ChatRequest, ChatResponse, SourceItem
 from app.services.auth import AuthUser, build_current_user_dependency
@@ -181,6 +182,8 @@ def build_router(
                 final = await engine.run(state)
             except Exception as exc:  # noqa: BLE001
                 await persist_failure(engine.state or state)
+                # M-31：排障需要的上下文用脱敏形式记，不写原文
+                logger.warning("chat 失败 query=%s", mask_pii(request.query))
                 raise HTTPException(status_code=502, detail=_friendly_error(exc)) from exc
             finally:
                 _release(rate_key)
@@ -214,6 +217,7 @@ def build_router(
                 await bus.emit("done", _done_payload(final, engine, started))
             except Exception as exc:  # noqa: BLE001
                 await persist_failure(engine.state or state)
+                logger.warning("chat 流式失败 query=%s", mask_pii(request.query))
                 await bus.emit("error", {"message": _friendly_error(exc)})
             finally:
                 await bus.close()

@@ -201,11 +201,14 @@ def reset_password(
     from app.db.session import new_session
     from app.services.auth import auth_tokens
 
+    # M-19：与注册共用策略，避免"注册严、重置松"的绕过口子
+    from app.core.password_policy import PasswordPolicyError, validate_password
+
     password = new_password or ""
-    if len(password) < MIN_PASSWORD_LENGTH:
-        raise UserAdminError(400, f"密码至少 {MIN_PASSWORD_LENGTH} 位")
-    if len(password) > MAX_PASSWORD_LENGTH:
-        raise UserAdminError(400, f"密码不能超过 {MAX_PASSWORD_LENGTH} 位")
+    try:
+        validate_password(password)
+    except PasswordPolicyError as exc:
+        raise UserAdminError(400, str(exc)) from exc
 
     with new_session(settings.mysql_url) as session:
         target = session.execute(select(User).where(User.id == int(user_id))).scalar_one_or_none()
