@@ -13,6 +13,10 @@ class UserItem(BaseModel):
     nickname: str = ""
     role: str = "student"
     status: int = 1
+    # N-20 身份画像（管理员可补录）
+    education_level: str = "unset"
+    college: str | None = None
+    grade: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -36,6 +40,10 @@ class UserUpdateRequest(BaseModel):
     nickname: str | None = None
     role: str | None = None
     status: int | None = None
+    # N-20：管理员补录身份
+    education_level: str | None = None
+    college: str | None = None
+    grade: str | None = None
 
 
 class ResetPasswordRequest(BaseModel):

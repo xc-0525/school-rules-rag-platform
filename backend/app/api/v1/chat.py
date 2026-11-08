@@ -164,11 +164,13 @@ def build_router(
     async def chat(request: ChatRequest, user: AuthUser = Depends(current_user)):
         # current_user 要么返回真实用户，要么返回独立的 anonymous 账号，不会返回 None；
         # 因此这里不存在"匿名回落 user_id=1（管理员）"的越权路径。
+        # N-20：身份画像随 token 下发（未设置时交给 Prompt 说明口径差异）
         state = AgentState(
             query=request.query,
             conversation_id=request.conversation_id,
             user_id=user.id,
             run_id=uuid.uuid4().hex[:12],
+            user_education=user.education_level or "unset",
         )
 
         rate_key = _guard_daily(user)

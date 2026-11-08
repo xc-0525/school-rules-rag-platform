@@ -10,6 +10,11 @@ export interface UserInfo {
   username: string
   nickname?: string | null
   role: 'admin' | 'student' | string
+  /** N-20 身份画像：本科/专科口径不同，检索与提示词按它调整 */
+  education_level?: 'unset' | 'undergraduate' | 'junior' | string
+  education_label?: string
+  college?: string | null
+  grade?: string | null
 }
 
 export interface LoginResponse {
@@ -351,6 +356,9 @@ export interface AdminUserItem {
   nickname: string
   role: string
   status: number
+  education_level?: string
+  college?: string | null
+  grade?: string | null
   created_at?: string | null
   updated_at?: string | null
 }
@@ -367,6 +375,9 @@ export interface AdminUserUpdate {
   nickname?: string
   role?: string
   status?: number
+  education_level?: string
+  college?: string
+  grade?: string
 }
 
 // ---------------- 工单闭环（N-01） ----------------

@@ -53,6 +53,9 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "nickname": row.nickname or "",
         "role": str(row.role or "student"),
         "status": int(row.status or 0),
+        "education_level": str(getattr(row, "education_level", "unset") or "unset"),
+        "college": getattr(row, "college", None),
+        "grade": getattr(row, "grade", None),
         "created_at": _iso(row.created_at),
         "updated_at": _iso(row.updated_at),
     }
@@ -130,14 +133,18 @@ def update_user(
     nickname: str | None = None,
     role: str | None = None,
     status: int | None = None,
+    education_level: str | None = None,
+    college: str | None = None,
+    grade: str | None = None,
 ) -> dict[str, Any]:
-    """修改昵称 / 角色 / 状态。用户名与密码不在此接口（密码走 reset_password）。"""
+    """修改昵称 / 角色 / 状态 / 身份画像。用户名与密码不在此接口（密码走 reset_password）。"""
     _require_mysql(settings)
 
     from sqlalchemy import select
 
     from app.db.models import User
     from app.db.session import new_session
+    from app.services.profile import ProfileError, normalize_education
 
     role = role.strip() if isinstance(role, str) and role.strip() else None
     if role is not None and role not in USER_ROLES:
@@ -148,6 +155,15 @@ def update_user(
         nickname = nickname.strip()
         if len(nickname) > 50:
             raise UserAdminError(400, "昵称不能超过 50 个字符")
+    if education_level is not None:
+        try:
+            education_level = normalize_education(education_level)
+        except ProfileError as exc:
+            raise UserAdminError(400, str(exc)) from exc
+    if college is not None and len(college.strip()) > 64:
+        raise UserAdminError(400, "学院名称不能超过 64 个字符")
+    if grade is not None and len(grade.strip()) > 16:
+        raise UserAdminError(400, "年级不能超过 16 个字符")
 
     with new_session(settings.mysql_url) as session:
         target = session.execute(select(User).where(User.id == int(user_id))).scalar_one_or_none()
@@ -171,6 +187,12 @@ def update_user(
             target.role = role
         if status is not None:
             target.status = int(status)
+        if education_level is not None:
+            target.education_level = education_level
+        if college is not None:
+            target.college = college.strip() or None
+        if grade is not None:
+            target.grade = grade.strip() or None
         target.updated_at = datetime.now()
         session.commit()
         session.refresh(target)

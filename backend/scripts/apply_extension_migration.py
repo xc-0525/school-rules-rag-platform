@@ -124,7 +124,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    settings = Settings.load()
+    settings = Settings.from_env()
     if not settings.mysql_url:
         print("未配置 MYSQL_URL，跳过迁移（内存模式无需建表）")
         return 0

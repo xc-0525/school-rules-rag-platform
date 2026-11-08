@@ -36,6 +36,10 @@ class User(Base):
     nickname: Mapped[str | None] = mapped_column(String(50), nullable=True)
     role: Mapped[str] = mapped_column(Enum("student", "admin", name="user_role"), default="student")
     status: Mapped[int] = mapped_column(Integer, default=1)
+    # N-20 身份画像：本科/专科口径不同，检索时按学历过滤（迁移见 009_user_education.sql）
+    education_level: Mapped[str] = mapped_column(String(16), default="unset")
+    college: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    grade: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -110,6 +114,8 @@ class Document(Base):
     status: Mapped[str] = mapped_column(
         Enum("pending", "processing", "done", "failed", name="document_status"), default="pending"
     )
+    # N-20：文档适用对象（undergraduate / junior / general），入库时按标题判定
+    education_level: Mapped[str] = mapped_column(String(16), default="general")
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

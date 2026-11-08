@@ -4,6 +4,7 @@ import {
   login as apiLogin,
   logout as apiLogout,
   register as apiRegister,
+  updateProfile as apiUpdateProfile,
 } from '../api/client'
 import { clearSession, getToken, getUser, setSession } from '../utils/session'
 import { useChatStore } from './chat'
@@ -19,6 +20,10 @@ export const useAuthStore = defineStore('auth', {
     isLoggedIn: (state) => !!state.token,
     isAdmin: (state) => state.user?.role === 'admin',
     displayName: (state) => state.user?.nickname || state.user?.username || '未登录',
+    /** 身份画像未设置：登录后引导补全（不硬猜学历） */
+    needsProfile: (state) =>
+      !!state.user && (state.user.education_level || 'unset') === 'unset',
+    educationLabel: (state) => state.user?.education_label || '未设置',
   },
 
   actions: {
@@ -32,12 +37,29 @@ export const useAuthStore = defineStore('auth', {
       return response.user
     },
 
-    async register(username: string, password: string, nickname?: string): Promise<UserInfo> {
-      const response = await apiRegister(username, password, nickname)
+    async register(
+      username: string,
+      password: string,
+      nickname?: string,
+      educationLevel?: string,
+    ): Promise<UserInfo> {
+      const response = await apiRegister(username, password, nickname, educationLevel)
       this.token = response.token
       this.user = response.user
       setSession(response.token, response.user)
       useChatStore().resetConversation()
+      return response.user
+    },
+
+    async saveProfile(payload: {
+      education_level?: string
+      college?: string
+      grade?: string
+    }): Promise<UserInfo> {
+      const response = await apiUpdateProfile(payload)
+      this.token = response.token
+      this.user = response.user
+      setSession(response.token, response.user)
       return response.user
     },
 

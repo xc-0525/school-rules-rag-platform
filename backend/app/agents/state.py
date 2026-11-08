@@ -28,6 +28,8 @@ class AgentState(BaseModel):
     conversation_id: int | None = None
     user_id: int = 0
     run_id: str = ""
+    # N-20 身份画像：undergraduate / junior / unset，检索与 Prompt 都按它调整口径
+    user_education: str = "unset"
 
     # ---- 多轮记忆（最近消息注入 Prompt）----
     history: list[dict[str, str]] = Field(default_factory=list)

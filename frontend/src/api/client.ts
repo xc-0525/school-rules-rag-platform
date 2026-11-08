@@ -95,11 +95,30 @@ export function register(
   username: string,
   password: string,
   nickname?: string,
+  educationLevel?: string,
 ): Promise<LoginResponse> {
   return request<LoginResponse>('/api/v1/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password, nickname: nickname || undefined }),
+    body: JSON.stringify({
+      username,
+      password,
+      nickname: nickname || undefined,
+      education_level: educationLevel || undefined,
+    }),
+  })
+}
+
+/** N-20：本人补全身份画像；服务端会换发带新画像的 token */
+export function updateProfile(payload: {
+  education_level?: string
+  college?: string
+  grade?: string
+}): Promise<LoginResponse> {
+  return request<LoginResponse>('/api/v1/auth/profile', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   })
 }
 

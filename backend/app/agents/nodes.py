@@ -128,8 +128,13 @@ async def memory_agent(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     }
 
 async def retrieve_vector(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
-    hits = await ctx.services.vector.search(_search_text(state), top_k=3)
-    return {"vector_hits": hits}
+    # N-20：已知学历时多召回一些再按适用对象过滤，避免过滤后不足 3 条
+    from app.services.profile import filter_evidence
+
+    level = state.user_education or "unset"
+    top_k = 6 if level in ("undergraduate", "junior") else 3
+    hits = await ctx.services.vector.search(_search_text(state), top_k=top_k)
+    return {"vector_hits": filter_evidence(hits, level, limit=3)}
 
 async def retrieve_graph(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     paths = await ctx.services.graph.search_paths(_search_text(state), top_k=2)
