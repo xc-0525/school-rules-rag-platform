@@ -34,6 +34,10 @@
         </el-menu-item>
 
         <li class="menu-group">系统</li>
+        <el-menu-item v-if="auth.isAdmin" index="/admin/tickets">
+          <el-icon><Tickets /></el-icon>
+          <span>工单处理</span>
+        </el-menu-item>
         <el-menu-item v-if="auth.isAdmin" index="/admin/users">
           <el-icon><UserFilled /></el-icon>
           <span>用户管理</span>
@@ -105,6 +109,7 @@ import {
   Document,
   InfoFilled,
   Suitcase,
+  Tickets,
   UserFilled,
 } from '@element-plus/icons-vue'
 import NoticeBanner from './components/NoticeBanner.vue'

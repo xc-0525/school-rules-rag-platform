@@ -15,6 +15,8 @@ import type {
   OcrStatus,
   RepairItem,
   ReservationItem,
+  TicketItem,
+  TicketPage,
   UploadedImage,
   UploadResult,
   UserInfo,
@@ -135,6 +137,39 @@ export function confirmTicket(payload: {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  })
+}
+
+/** 工单列表：学生=本人，管理员=全部（N-01） */
+export function fetchTickets(query: {
+  status?: string
+  keyword?: string
+  limit?: number
+  offset?: number
+} = {}): Promise<TicketPage> {
+  const params = new URLSearchParams()
+  if (query.status) params.set('status', query.status)
+  if (query.keyword) params.set('keyword', query.keyword)
+  if (query.limit) params.set('limit', String(query.limit))
+  if (query.offset) params.set('offset', String(query.offset))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return request<TicketPage>(`/api/v1/tickets${suffix}`)
+}
+
+export function fetchTicket(id: number): Promise<TicketItem> {
+  return request<TicketItem>(`/api/v1/tickets/${id}`)
+}
+
+/** 流转：accept 受理 / process 记录进展 / close 关闭（备注必填） */
+export function transitionTicket(
+  id: number,
+  action: 'accept' | 'process' | 'close',
+  remark = '',
+): Promise<TicketItem> {
+  return request<TicketItem>(`/api/v1/tickets/${id}/transition`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, remark }),
   })
 }
 

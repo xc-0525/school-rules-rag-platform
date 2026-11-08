@@ -49,6 +49,12 @@ const router = createRouter({
       meta: { title: '用户管理', requiresAdmin: true },
     },
     {
+      path: '/admin/tickets',
+      name: 'admin-tickets',
+      component: () => import('../views/TicketAdminView.vue'),
+      meta: { title: '工单处理', requiresAdmin: true },
+    },
+    {
       path: '/about',
       name: 'about',
       component: () => import('../views/AboutView.vue'),

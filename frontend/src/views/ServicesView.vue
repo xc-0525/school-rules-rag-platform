@@ -222,6 +222,39 @@
           </div>
         </div>
       </el-tab-pane>
+
+      <!-- ================= 我的工单（N-01） ================= -->
+      <el-tab-pane label="我的工单" name="tickets">
+        <div class="service-toolbar">
+          <el-select v-model="ticketStatus" clearable placeholder="全部状态" style="width: 132px" @change="loadTickets">
+            <el-option label="待受理" value="open" />
+            <el-option label="处理中" value="processing" />
+            <el-option label="已关闭" value="closed" />
+          </el-select>
+          <el-button :loading="ticketLoading" @click="loadTickets">刷新</el-button>
+          <router-link v-if="auth.isAdmin" to="/admin/tickets">
+            <el-button link type="primary">去工单处理台</el-button>
+          </router-link>
+          <span class="muted" style="font-size: 12px">
+            转人工 / 投诉工单与寝室报修分开管理；关闭后处理意见在此可见
+          </span>
+        </div>
+        <el-empty v-if="!tickets.length" description="暂无工单" :image-size="80" />
+        <div v-for="item in tickets" :key="item.id" class="service-card">
+          <div class="notice-head">
+            <el-tag size="small" :type="ticketStatusType(item.status)">{{ item.status_label }}</el-tag>
+            <el-tag size="small" effect="plain" type="info">{{ item.category || '其他' }}</el-tag>
+            <span class="notice-title">{{ item.title }}</span>
+            <span class="notice-time">{{ item.ticket_no }} · {{ item.created_at }}</span>
+          </div>
+          <div class="notice-content">{{ item.description }}</div>
+          <div class="notice-foot">
+            <span v-if="item.handler_remark">处理意见：{{ item.handler_remark }}</span>
+            <span v-else class="muted">暂未处理，管理员受理后可在此查看进度</span>
+            <span v-if="item.closed_at" class="muted">· 关闭于 {{ item.closed_at }}</span>
+          </div>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <!-- 报修申请弹窗 -->
@@ -403,6 +436,7 @@ import {
   fetchLostFound,
   fetchRepairs,
   fetchReservations,
+  fetchTickets,
   resolveLostFound,
   reviewLostFound,
   transitionRepair,
@@ -411,7 +445,7 @@ import {
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import SecureImage from '../components/SecureImage.vue'
-import type { AvailabilityInfo, LocationItem, LostFoundItem, RepairItem, ReservationItem } from '../types'
+import type { AvailabilityInfo, LocationItem, LostFoundItem, RepairItem, ReservationItem, TicketItem } from '../types'
 
 const auth = useAuthStore()
 const tab = ref('repairs')
@@ -899,6 +933,29 @@ async function resolveLf(item: LostFoundItem) {
   }
 }
 
+// ---------------- 我的工单（N-01） ----------------
+const tickets = ref<TicketItem[]>([])
+const ticketStatus = ref('')
+const ticketLoading = ref(false)
+
+const TICKET_STATUS: Record<string, { label: string; type: 'warning' | 'primary' | 'info' }> = {
+  open: { label: '待受理', type: 'warning' },
+  processing: { label: '处理中', type: 'primary' },
+  closed: { label: '已关闭', type: 'info' },
+}
+const ticketStatusType = (s: string) => TICKET_STATUS[s]?.type ?? 'info'
+
+async function loadTickets() {
+  ticketLoading.value = true
+  try {
+    tickets.value = (await fetchTickets({ status: ticketStatus.value })).items
+  } catch (error: any) {
+    ElMessage.error(`加载工单失败：${error?.message || error}`)
+  } finally {
+    ticketLoading.value = false
+  }
+}
+
 // ---------------- 装载 ----------------
 function onTabChange(name: string | number) {
   if (name === 'repairs') loadRepairs()
@@ -906,6 +963,7 @@ function onTabChange(name: string | number) {
     loadLocations()
     loadReservations()
   } else if (name === 'lostfound') loadLostFound()
+  else if (name === 'tickets') loadTickets()
 }
 
 onMounted(() => {

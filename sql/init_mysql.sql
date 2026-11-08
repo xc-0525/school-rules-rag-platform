@@ -175,11 +175,15 @@ CREATE TABLE IF NOT EXISTS tickets (
   description TEXT            NOT NULL,
   category    VARCHAR(50)     DEFAULT NULL,
   status      ENUM('open','processing','closed') NOT NULL DEFAULT 'open',
+  handler_id     INT           NULL DEFAULT NULL COMMENT '处理人（管理员用户 id，N-01）',
+  handler_remark TEXT          NULL COMMENT '处理意见（关闭必填，学生可见，N-01）',
+  closed_at      DATETIME      NULL DEFAULT NULL COMMENT '关闭时间（N-01）',
   created_at  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  DATETIME        NULL DEFAULT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_ticket_no (ticket_no),
   KEY idx_ticket_user (user_id, status),
+  KEY idx_tickets_status_created (status, created_at),
   CONSTRAINT fk_ticket_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='转人工/投诉工单表';
 

@@ -368,3 +368,29 @@ export interface AdminUserUpdate {
   role?: string
   status?: number
 }
+
+// ---------------- 工单闭环（N-01） ----------------
+
+export interface TicketItem {
+  id: number
+  ticket_no: string
+  user_id: number
+  /** 管理员视图显示提交人 */
+  username?: string | null
+  title: string
+  description: string
+  category: string | null
+  status: 'open' | 'processing' | 'closed'
+  status_label: string
+  handler_id: number | null
+  handler_remark: string | null
+  created_at: string | null
+  updated_at: string | null
+  closed_at: string | null
+}
+
+export interface TicketPage {
+  items: TicketItem[]
+  total: number
+}
+

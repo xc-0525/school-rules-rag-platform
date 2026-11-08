@@ -156,6 +156,11 @@ class Ticket(Base):
     description: Mapped[str] = mapped_column(Text)
     category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="open")
+    # N-01 工单闭环：受理人、处理意见（关闭必填）、关闭时间
+    # 迁移见 sql/migrations/008_ticket_workflow.sql
+    handler_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    handler_remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
