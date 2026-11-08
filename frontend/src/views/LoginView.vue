@@ -85,7 +85,7 @@
                 <el-input
                   v-model="registerForm.password"
                   type="password"
-                  placeholder="至少 6 位"
+                  placeholder="至少 8 位，字母/数字/符号任两类"
                   size="large"
                   show-password
                 />
@@ -182,8 +182,8 @@ async function submitRegister() {
     error.value = '用户名需为 3-20 位字母、数字或下划线'
     return
   }
-  if (registerForm.password.length < 6) {
-    error.value = '密码至少 6 位'
+  if (registerForm.password.length < 8) {
+    error.value = '密码至少 8 位，且需包含字母、数字、符号中的至少两类'
     return
   }
   if (registerForm.password !== registerForm.confirm) {

@@ -173,7 +173,7 @@
             v-model="resetForm.password"
             type="password"
             show-password
-            placeholder="至少 6 位"
+            placeholder="至少 8 位，字母/数字/符号任两类"
             maxlength="128"
           />
         </div>
@@ -379,8 +379,8 @@ function openReset(row: AdminUserItem) {
 async function submitReset() {
   if (!resetting.value) return
   const { password, confirm } = resetForm.value
-  if (password.length < 6) {
-    ElMessage.warning('密码至少 6 位')
+  if (password.length < 8) {
+    ElMessage.warning('密码至少 8 位，且需包含字母、数字、符号中的至少两类')
     return
   }
   if (password !== confirm) {
