@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS users (
   nickname    VARCHAR(50)  DEFAULT NULL COMMENT '昵称',
   role        ENUM('student','admin') NOT NULL DEFAULT 'student' COMMENT '角色',
   status      TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '1=正常 0=禁用',
+  education_level VARCHAR(16) NOT NULL DEFAULT 'unset' COMMENT '本科/专科/未设置（N-20）',
+  college     VARCHAR(64)  DEFAULT NULL COMMENT '学院（N-20）',
+  grade       VARCHAR(16)  DEFAULT NULL COMMENT '年级（N-20）',
   created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  DATETIME     NULL DEFAULT NULL,
   PRIMARY KEY (id),
@@ -79,6 +82,7 @@ CREATE TABLE IF NOT EXISTS documents (
   file_size     INT UNSIGNED    NOT NULL DEFAULT 0 COMMENT '字节数',
   chunk_count   INT UNSIGNED    NOT NULL DEFAULT 0 COMMENT '分块数量',
   status        ENUM('pending','processing','done','failed') NOT NULL DEFAULT 'pending' COMMENT '处理状态',
+  education_level VARCHAR(16)  NOT NULL DEFAULT 'general' COMMENT '本科/专科/通用（N-20）',
   error_message VARCHAR(500)    DEFAULT NULL COMMENT '失败原因',
   created_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME        NULL DEFAULT NULL,
@@ -175,11 +179,15 @@ CREATE TABLE IF NOT EXISTS tickets (
   description TEXT            NOT NULL,
   category    VARCHAR(50)     DEFAULT NULL,
   status      ENUM('open','processing','closed') NOT NULL DEFAULT 'open',
+  handler_id     INT           NULL DEFAULT NULL COMMENT '处理人（管理员用户 id，N-01）',
+  handler_remark TEXT          NULL COMMENT '处理意见（关闭必填，学生可见，N-01）',
+  closed_at      DATETIME      NULL DEFAULT NULL COMMENT '关闭时间（N-01）',
   created_at  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  DATETIME        NULL DEFAULT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_ticket_no (ticket_no),
   KEY idx_ticket_user (user_id, status),
+  KEY idx_tickets_status_created (status, created_at),
   CONSTRAINT fk_ticket_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='转人工/投诉工单表';
 

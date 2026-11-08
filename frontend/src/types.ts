@@ -10,6 +10,11 @@ export interface UserInfo {
   username: string
   nickname?: string | null
   role: 'admin' | 'student' | string
+  /** N-20 身份画像：本科/专科口径不同，检索与提示词按它调整 */
+  education_level?: 'unset' | 'undergraduate' | 'junior' | string
+  education_label?: string
+  college?: string | null
+  grade?: string | null
 }
 
 export interface LoginResponse {
@@ -354,6 +359,9 @@ export interface AdminUserItem {
   nickname: string
   role: string
   status: number
+  education_level?: string
+  college?: string | null
+  grade?: string | null
   created_at?: string | null
   updated_at?: string | null
 }
@@ -370,4 +378,115 @@ export interface AdminUserUpdate {
   nickname?: string
   role?: string
   status?: number
+  education_level?: string
+  college?: string
+  grade?: string
 }
+
+// ---------------- 工单闭环（N-01） ----------------
+
+export interface TicketItem {
+  id: number
+  ticket_no: string
+  user_id: number
+  /** 管理员视图显示提交人 */
+  username?: string | null
+  title: string
+  description: string
+  category: string | null
+  status: 'open' | 'processing' | 'closed'
+  status_label: string
+  handler_id: number | null
+  handler_remark: string | null
+  created_at: string | null
+  updated_at: string | null
+  closed_at: string | null
+}
+
+export interface TicketPage {
+  items: TicketItem[]
+  total: number
+}
+
+// ---------------- 反馈与未命中工作台（N-25） ----------------
+
+export interface FeedbackItem {
+  id: number
+  message_id: number
+  user_id: number
+  username: string | null
+  rating: number
+  rating_label: string
+  comment: string | null
+  /** 该回答对应的用户提问 */
+  question: string | null
+  answer: string | null
+  attribution: string | null
+  handle_status: 'pending' | 'attributed' | 'resolved' | 'verified'
+  status_label: string
+  handler_id: number | null
+  handled_at: string | null
+  handle_remark: string | null
+  created_at: string | null
+}
+
+export interface FeedbackPage {
+  items: FeedbackItem[]
+  total: number
+}
+
+export interface UnmatchedItem {
+  query_hash: string
+  query_text: string
+  count: number
+  first_seen: string | null
+  last_seen: string | null
+  status: 'pending' | 'ignored' | 'resolved'
+  status_label: string
+  remark: string | null
+}
+
+export interface UnmatchedPage {
+  items: UnmatchedItem[]
+  total: number
+}
+
+// ---------------- 运营看板（N-24） ----------------
+
+export interface TrendPoint {
+  date: string
+  questions: number
+  refused: number
+}
+
+export interface OverviewData {
+  generated_at: string
+  days: number
+  scale: {
+    questions: number
+    prev_questions: number
+    delta_rate: number | null
+    active_users: number
+    conversations: number
+    avg_questions_per_conversation: number
+  }
+  quality: {
+    answers: number
+    refused: number
+    refusal_rate: number
+    feedback_total: number
+    likes: number
+    dislikes: number
+    like_rate: number
+  }
+  efficiency: {
+    p50_ms: number
+    p95_ms: number
+    tool_calls: number
+    tool_success_rate: number
+  }
+  trend: TrendPoint[]
+  top_unmatched: Array<{ query_text: string; count: number; last_seen: string | null }>
+  low_rated: Array<{ id: number; question: string | null; comment: string | null; created_at: string | null }>
+}
+

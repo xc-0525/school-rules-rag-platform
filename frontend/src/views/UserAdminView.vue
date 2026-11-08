@@ -74,6 +74,19 @@
           />
         </template>
       </el-table-column>
+      <el-table-column label="学历" width="96">
+        <template #default="{ row }">
+          <el-tag size="small" effect="plain" :type="row.education_level === 'unset' ? 'info' : 'success'">
+            {{ EDUCATION_LABELS[row.education_level || 'unset'] || '未设置' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="学院 / 年级" min-width="150">
+        <template #default="{ row }">
+          <span v-if="row.college || row.grade">{{ row.college || '—' }} · {{ row.grade || '—' }}</span>
+          <span v-else class="muted">—</span>
+        </template>
+      </el-table-column>
       <el-table-column label="创建时间" width="170">
         <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
       </el-table-column>
@@ -120,6 +133,22 @@
             <el-option label="启用" :value="1" />
             <el-option label="禁用（无法登录）" :value="0" />
           </el-select>
+        </div>
+        <div class="ua-form-row">
+          <label>学历</label>
+          <el-select v-model="editForm.education_level" style="width: 100%">
+            <el-option label="未设置" value="unset" />
+            <el-option label="本科" value="undergraduate" />
+            <el-option label="专科" value="junior" />
+          </el-select>
+        </div>
+        <div class="ua-form-row">
+          <label>学院</label>
+          <el-input v-model="editForm.college" maxlength="64" placeholder="如：人工智能学院" />
+        </div>
+        <div class="ua-form-row">
+          <label>年级</label>
+          <el-input v-model="editForm.grade" maxlength="16" placeholder="如：2024" />
         </div>
         <div v-if="isSelf" class="muted ua-tip">
           不能修改自己的角色与状态，避免把系统锁死在无人可管理的状态。
@@ -198,7 +227,21 @@ const pageSize = 20
 
 const editVisible = ref(false)
 const editing = ref<AdminUserItem | null>(null)
-const editForm = ref({ nickname: '', role: 'student', status: 1 })
+const editForm = ref({
+  nickname: '',
+  role: 'student',
+  status: 1,
+  education_level: 'unset',
+  college: '',
+  grade: '',
+})
+
+const EDUCATION_LABELS: Record<string, string> = {
+  unset: '未设置',
+  undergraduate: '本科',
+  junior: '专科',
+  general: '通用',
+}
 
 const resetVisible = ref(false)
 const resetting = ref<AdminUserItem | null>(null)
@@ -283,6 +326,9 @@ function openEdit(row: AdminUserItem) {
     nickname: row.nickname || '',
     role: row.role || 'student',
     status: row.status ?? 1,
+    education_level: row.education_level || 'unset',
+    college: row.college || '',
+    grade: row.grade || '',
   }
   editVisible.value = true
 }
@@ -290,8 +336,18 @@ function openEdit(row: AdminUserItem) {
 async function submitEdit() {
   if (!editing.value) return
   const target = editing.value
-  const payload: { nickname?: string; role?: string; status?: number } = {
+  const payload: {
+    nickname?: string
+    role?: string
+    status?: number
+    education_level?: string
+    college?: string
+    grade?: string
+  } = {
     nickname: editForm.value.nickname.trim(),
+    education_level: editForm.value.education_level,
+    college: editForm.value.college.trim(),
+    grade: editForm.value.grade.trim(),
   }
   // 自己只改昵称：角色和状态后端也会拒绝，前端不发这两个字段
   if (!isSelf.value) {

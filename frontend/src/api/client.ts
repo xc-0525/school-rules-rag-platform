@@ -6,6 +6,8 @@ import type {
   ConversationDetail,
   ConversationPage,
   DocumentItem,
+  FeedbackItem,
+  FeedbackPage,
   HealthInfo,
   LocationItem,
   LoginResponse,
@@ -13,8 +15,12 @@ import type {
   NoticeCategoryOption,
   NoticeItem,
   OcrStatus,
+  OverviewData,
   RepairItem,
   ReservationItem,
+  TicketItem,
+  TicketPage,
+  UnmatchedPage,
   UploadedImage,
   UploadResult,
   UserInfo,
@@ -89,11 +95,30 @@ export function register(
   username: string,
   password: string,
   nickname?: string,
+  educationLevel?: string,
 ): Promise<LoginResponse> {
   return request<LoginResponse>('/api/v1/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password, nickname: nickname || undefined }),
+    body: JSON.stringify({
+      username,
+      password,
+      nickname: nickname || undefined,
+      education_level: educationLevel || undefined,
+    }),
+  })
+}
+
+/** N-20：本人补全身份画像；服务端会换发带新画像的 token */
+export function updateProfile(payload: {
+  education_level?: string
+  college?: string
+  grade?: string
+}): Promise<LoginResponse> {
+  return request<LoginResponse>('/api/v1/auth/profile', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   })
 }
 
@@ -136,6 +161,106 @@ export function confirmTicket(payload: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
+}
+
+/** 工单列表：学生=本人，管理员=全部（N-01） */
+export function fetchTickets(query: {
+  status?: string
+  keyword?: string
+  limit?: number
+  offset?: number
+} = {}): Promise<TicketPage> {
+  const params = new URLSearchParams()
+  if (query.status) params.set('status', query.status)
+  if (query.keyword) params.set('keyword', query.keyword)
+  if (query.limit) params.set('limit', String(query.limit))
+  if (query.offset) params.set('offset', String(query.offset))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return request<TicketPage>(`/api/v1/tickets${suffix}`)
+}
+
+export function fetchTicket(id: number): Promise<TicketItem> {
+  return request<TicketItem>(`/api/v1/tickets/${id}`)
+}
+
+/** 流转：accept 受理 / process 记录进展 / close 关闭（备注必填） */
+export function transitionTicket(
+  id: number,
+  action: 'accept' | 'process' | 'close',
+  remark = '',
+): Promise<TicketItem> {
+  return request<TicketItem>(`/api/v1/tickets/${id}/transition`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, remark }),
+  })
+}
+
+// ---------------- 反馈与未命中工作台（N-25） ----------------
+export interface FeedbackQuery {
+  rating?: number
+  status?: string
+  keyword?: string
+  limit?: number
+  offset?: number
+}
+
+export function fetchAdminFeedback(query: FeedbackQuery = {}): Promise<FeedbackPage> {
+  const params = new URLSearchParams()
+  if (query.rating) params.set('rating', String(query.rating))
+  if (query.status) params.set('status', query.status)
+  if (query.keyword) params.set('keyword', query.keyword)
+  if (query.limit) params.set('limit', String(query.limit))
+  if (query.offset) params.set('offset', String(query.offset))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return request<FeedbackPage>(`/api/v1/admin/feedback${suffix}`)
+}
+
+export function transitionFeedback(
+  id: number,
+  action: 'attribute' | 'resolve' | 'verify',
+  payload: { attribution?: string; remark?: string } = {},
+): Promise<FeedbackItem> {
+  return request<FeedbackItem>(`/api/v1/admin/feedback/${id}/transition`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...payload }),
+  })
+}
+
+export interface UnmatchedQuery {
+  days?: number
+  status?: string
+  keyword?: string
+  limit?: number
+  offset?: number
+}
+
+export function fetchUnmatched(query: UnmatchedQuery = {}): Promise<UnmatchedPage> {
+  const params = new URLSearchParams()
+  if (query.days) params.set('days', String(query.days))
+  if (query.status) params.set('status', query.status)
+  if (query.keyword) params.set('keyword', query.keyword)
+  if (query.limit) params.set('limit', String(query.limit))
+  if (query.offset) params.set('offset', String(query.offset))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return request<UnmatchedPage>(`/api/v1/admin/unmatched${suffix}`)
+}
+
+export function markUnmatched(
+  queryHash: string,
+  payload: { status: 'pending' | 'ignored' | 'resolved'; remark?: string; query_text?: string },
+): Promise<{ query_hash: string; status: string; status_label: string; remark: string | null }> {
+  return request(`/api/v1/admin/unmatched/${queryHash}/mark`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+// ---------------- 运营看板（N-24） ----------------
+export function fetchOverview(days = 7): Promise<OverviewData> {
+  return request<OverviewData>(`/api/v1/admin/stats/overview?days=${days}`)
 }
 
 // ---------------- 校园公告 ----------------

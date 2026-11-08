@@ -75,6 +75,12 @@
               <el-form-item label="昵称（可选）">
                 <el-input v-model="registerForm.nickname" placeholder="例如：张三" size="large" />
               </el-form-item>
+              <el-form-item label="学历（可选，可稍后补全）">
+                <el-radio-group v-model="registerForm.education_level">
+                  <el-radio label="undergraduate">本科</el-radio>
+                  <el-radio label="junior">专科</el-radio>
+                </el-radio-group>
+              </el-form-item>
               <el-form-item label="密码">
                 <el-input
                   v-model="registerForm.password"
@@ -136,7 +142,13 @@ const loading = ref(false)
 const error = ref('')
 
 const loginForm = reactive({ username: '', password: '' })
-const registerForm = reactive({ username: '', nickname: '', password: '', confirm: '' })
+const registerForm = reactive({
+  username: '',
+  nickname: '',
+  password: '',
+  confirm: '',
+  education_level: 'undergraduate',
+})
 
 function redirectAfterLogin() {
   const redirect = (route.query.redirect as string) || '/chat'
@@ -180,7 +192,12 @@ async function submitRegister() {
   }
   loading.value = true
   try {
-    await auth.register(username, registerForm.password, registerForm.nickname.trim() || undefined)
+    await auth.register(
+      username,
+      registerForm.password,
+      registerForm.nickname.trim() || undefined,
+      registerForm.education_level || undefined,
+    )
     ElMessage.success(`注册成功，欢迎，${auth.displayName}`)
     redirectAfterLogin()
   } catch (err: any) {

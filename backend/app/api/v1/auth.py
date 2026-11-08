@@ -9,7 +9,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app.core.config import Settings
-from app.schemas.auth import LoginRequest, LoginResponse, LogoutResponse, RegisterRequest, UserInfo
+from app.schemas.auth import (
+    LoginRequest,
+    LoginResponse,
+    LogoutResponse,
+    ProfileUpdateRequest,
+    RegisterRequest,
+    UserInfo,
+)
+from app.services import profile as profile_service
 from app.services.auth import (
     AuthUser,
     RegistrationError,
@@ -24,6 +32,19 @@ logger = logging.getLogger("app.api.auth")
 
 def build_router(settings: Settings, limiter: Any | None = None) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["鉴权"])
+
+    async def _user_info(user: AuthUser) -> UserInfo:
+        """拼装用户信息：账号字段 + 身份画像（N-20，随 token 携带，不额外查库）。"""
+        return UserInfo(
+            id=user.id,
+            username=user.username,
+            nickname=user.nickname,
+            role=user.role,
+            education_level=user.education_level or "unset",
+            education_label=profile_service.education_label(user.education_level),
+            college=user.college,
+            grade=user.grade,
+        )
 
     @router.post(
         "/auth/login",
@@ -63,12 +84,7 @@ def build_router(settings: Settings, limiter: Any | None = None) -> APIRouter:
         return LoginResponse(
             token=token,
             expires_in=expires_in,
-            user=UserInfo(
-                id=user.id,
-                username=user.username,
-                nickname=user.nickname,
-                role=user.role,
-            ),
+            user=await _user_info(user),
         )
 
     @router.post(
@@ -85,6 +101,7 @@ def build_router(settings: Settings, limiter: Any | None = None) -> APIRouter:
                 payload.username,
                 payload.password,
                 payload.nickname,
+                payload.education_level,
             )
         except RegistrationError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -98,12 +115,7 @@ def build_router(settings: Settings, limiter: Any | None = None) -> APIRouter:
         return LoginResponse(
             token=token,
             expires_in=expires_in,
-            user=UserInfo(
-                id=user.id,
-                username=user.username,
-                nickname=user.nickname,
-                role=user.role,
-            ),
+            user=await _user_info(user),
         )
 
     @router.get(
@@ -113,8 +125,41 @@ def build_router(settings: Settings, limiter: Any | None = None) -> APIRouter:
     )
     async def me(user: AuthUser = Depends(build_current_user_dependency(settings))):
         # P0-3：改走 current_user 依赖链，接入 60s 缓存的账号活性检查
-        return UserInfo(
-            id=user.id, username=user.username, nickname=user.nickname, role=user.role
+        return await _user_info(user)
+
+    @router.patch(
+        "/auth/profile",
+        response_model=LoginResponse,
+        summary="补全本人身份画像（学历/学院/年级），返回新 token",
+    )
+    async def update_profile_api(
+        payload: ProfileUpdateRequest,
+        user: AuthUser = Depends(build_current_user_dependency(settings)),
+    ):
+        try:
+            profile = await asyncio.to_thread(
+                profile_service.update_profile,
+                settings,
+                user.id,
+                education_level=payload.education_level,
+                college=payload.college,
+                grade=payload.grade,
+            )
+        except profile_service.ProfileError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # 画像随 token 下发，改完必须换发新 token，否则 /auth/me 仍是旧值
+        updated = AuthUser(
+            id=user.id,
+            username=user.username,
+            nickname=user.nickname,
+            role=user.role,
+            education_level=profile["education_level"],
+            college=profile["college"],
+            grade=profile["grade"],
+        )
+        token, expires_in = auth_tokens.issue(updated)
+        return LoginResponse(
+            token=token, expires_in=expires_in, user=await _user_info(updated)
         )
 
     @router.post(

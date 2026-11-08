@@ -34,6 +34,18 @@
         </el-menu-item>
 
         <li class="menu-group">系统</li>
+        <el-menu-item v-if="auth.isAdmin" index="/admin/dashboard">
+          <el-icon><DataAnalysis /></el-icon>
+          <span>运营看板</span>
+        </el-menu-item>
+        <el-menu-item v-if="auth.isAdmin" index="/admin/tickets">
+          <el-icon><Tickets /></el-icon>
+          <span>工单处理</span>
+        </el-menu-item>
+        <el-menu-item v-if="auth.isAdmin" index="/admin/feedback">
+          <el-icon><ChatLineSquare /></el-icon>
+          <span>反馈工作台</span>
+        </el-menu-item>
         <el-menu-item v-if="auth.isAdmin" index="/admin/users">
           <el-icon><UserFilled /></el-icon>
           <span>用户管理</span>
@@ -74,8 +86,8 @@
           </span>
           <span v-if="health?.llm_configured" class="meta-chip is-muted">DeepSeek</span>
           <span v-if="health" class="meta-chip is-muted">{{ health.graph.agent_node_count }} Agent 节点</span>
-          <span v-if="auth.user" class="meta-chip is-brand">
-            {{ auth.isAdmin ? '管理员' : '学生' }} · {{ auth.displayName }}
+          <span v-if="auth.user" class="meta-chip is-brand" style="cursor: pointer" title="点击修改身份信息" @click="openProfile">
+            {{ auth.isAdmin ? '管理员' : auth.educationLabel }} · {{ auth.displayName }}
           </span>
           <el-button link type="primary" @click="refresh">刷新</el-button>
           <el-button link type="danger" @click="handleLogout">退出</el-button>
@@ -93,18 +105,48 @@
       </el-main>
     </el-container>
   </el-container>
+
+  <!-- N-20：身份画像补全（首次登录引导；不设置也可以，回答会说明本科/专科口径差异） -->
+  <el-dialog v-model="profileVisible" title="补全身份信息" width="460px" :close-on-click-modal="false">
+    <div class="muted" style="margin-bottom: 12px; font-size: 12px">
+      学校部分规定分本科 / 专科口径（如学籍管理、培养方案）。补全后回答会优先引用对应条款；
+      暂不设置也可以，系统会在答案中说明两者差异。
+    </div>
+    <el-form label-width="72px">
+      <el-form-item label="学历">
+        <el-radio-group v-model="profileForm.education_level">
+          <el-radio label="undergraduate">本科</el-radio>
+          <el-radio label="junior">专科</el-radio>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item label="学院">
+        <el-input v-model="profileForm.college" maxlength="64" placeholder="如：人工智能学院" />
+      </el-form-item>
+      <el-form-item label="年级">
+        <el-input v-model="profileForm.grade" maxlength="16" placeholder="如：2024" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="dismissProfile">稍后再说</el-button>
+      <el-button type="primary" :loading="profileSaving" @click="saveProfile">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import {
   Bell,
   ChatDotRound,
+  ChatLineSquare,
   Clock,
+  DataAnalysis,
   Document,
   InfoFilled,
   Suitcase,
+  Tickets,
   UserFilled,
 } from '@element-plus/icons-vue'
 import NoticeBanner from './components/NoticeBanner.vue'
@@ -133,8 +175,54 @@ async function handleLogout() {
   router.push('/login')
 }
 
+// ---------------- N-20 身份画像 ----------------
+const PROFILE_PROMPT_KEY = 'wut-profile-prompted'
+const profileVisible = ref(false)
+const profileSaving = ref(false)
+const profileForm = ref({ education_level: 'undergraduate', college: '', grade: '' })
+
+function openProfile() {
+  const level = auth.user?.education_level
+  profileForm.value = {
+    education_level: level === 'junior' ? 'junior' : 'undergraduate',
+    college: auth.user?.college || '',
+    grade: auth.user?.grade || '',
+  }
+  profileVisible.value = true
+}
+
+function dismissProfile() {
+  profileVisible.value = false
+  sessionStorage.setItem(PROFILE_PROMPT_KEY, '1')
+}
+
+async function saveProfile() {
+  profileSaving.value = true
+  try {
+    await auth.saveProfile({
+      education_level: profileForm.value.education_level,
+      college: profileForm.value.college.trim(),
+      grade: profileForm.value.grade.trim(),
+    })
+    ElMessage.success('已保存，回答会优先引用对应学历的规定')
+    profileVisible.value = false
+  } catch (error: any) {
+    ElMessage.error(`${error?.message || error}`)
+  } finally {
+    profileSaving.value = false
+  }
+}
+
 onMounted(async () => {
   await refresh()
   if (auth.isLoggedIn) await auth.refreshMe()
+  if (
+    auth.isLoggedIn &&
+    !auth.isAdmin &&
+    auth.needsProfile &&
+    !sessionStorage.getItem(PROFILE_PROMPT_KEY)
+  ) {
+    openProfile()
+  }
 })
 </script>

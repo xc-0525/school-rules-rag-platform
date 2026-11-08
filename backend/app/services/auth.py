@@ -99,6 +99,11 @@ class AuthUser:
     username: str
     nickname: str | None
     role: str
+    # N-20 身份画像：随 token 下发，避免 /auth/me 每次查库；
+    # 本人改资料时会重新签发 token，管理员代改在对方下次登录生效。
+    education_level: str = "unset"
+    college: str | None = None
+    grade: str | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -150,6 +155,9 @@ class AuthTokenStore:
             "u": user.username,
             "n": user.nickname or "",
             "r": user.role,
+            "edu": user.education_level or "unset",
+            "col": user.college or "",
+            "gr": user.grade or "",
             "iat": issued_at,
             "exp": issued_at + self._ttl,
             "jti": secrets.token_hex(8),
@@ -193,6 +201,10 @@ class AuthTokenStore:
             username=str(payload.get("u") or ""),
             nickname=str(payload.get("n") or "") or None,
             role=str(payload.get("r") or "student"),
+            # 老 token 没有这三个字段时回落 unset，不影响已签发凭证
+            education_level=str(payload.get("edu") or "unset"),
+            college=str(payload.get("col") or "") or None,
+            grade=str(payload.get("gr") or "") or None,
         )
 
     def revoke(self, token: str | None) -> None:
@@ -289,6 +301,9 @@ def anonymous_user(settings: Settings) -> AuthUser:
                         username=row.username,
                         nickname=row.nickname,
                         role=str(row.role or "student"),
+                        education_level=str(getattr(row, "education_level", "unset") or "unset"),
+                        college=getattr(row, "college", None),
+                        grade=getattr(row, "grade", None),
                     )
             except Exception:  # noqa: BLE001 —— 建号失败时降级为内存身份，不阻断问答
                 logger.exception("匿名账号初始化失败，降级为内存身份")
@@ -328,6 +343,9 @@ def authenticate(settings: Settings, username: str, password: str) -> AuthUser |
             username=user.username,
             nickname=user.nickname,
             role=str(user.role or "student"),
+            education_level=str(getattr(user, "education_level", "unset") or "unset"),
+            college=getattr(user, "college", None),
+            grade=getattr(user, "grade", None),
         )
 
     demo = _demo_users().get(username)
@@ -354,11 +372,19 @@ def register_user(
     username: str,
     password: str,
     nickname: str | None = None,
+    education_level: str | None = None,
 ) -> AuthUser:
     """学生自助注册（默认 student 角色；管理员只预置，不开放注册）。"""
     username = (username or "").strip()
     password = password or ""
     nickname = (nickname or "").strip() or username
+
+    from app.services.profile import ProfileError, normalize_education
+
+    try:
+        education_level = normalize_education(education_level) if education_level else "unset"
+    except ProfileError as exc:
+        raise RegistrationError(400, str(exc)) from exc
 
     if not settings.allow_registration:
         raise RegistrationError(403, "当前未开放注册")
@@ -396,6 +422,7 @@ def register_user(
                     nickname=nickname,
                     role="student",
                     status=1,
+                    education_level=education_level,
                     updated_at=datetime.now(),
                 )
                 session.add(user)
@@ -406,6 +433,9 @@ def register_user(
                     username=user.username,
                     nickname=user.nickname,
                     role=str(user.role or "student"),
+                    education_level=str(getattr(user, "education_level", "unset") or "unset"),
+                    college=getattr(user, "college", None),
+                    grade=getattr(user, "grade", None),
                 )
         except RegistrationError:
             raise
@@ -424,7 +454,18 @@ def register_user(
             "nickname": nickname,
             "role": "student",
         }
-    return AuthUser(id=user_id, username=username, nickname=nickname, role="student")
+    if education_level and education_level != "unset":
+        # 内存模式：注册时填的学历落到 profile 的进程内存储
+        from app.services import profile as profile_service
+
+        profile_service.update_profile(settings, user_id, education_level=education_level)
+    return AuthUser(
+        id=user_id,
+        username=username,
+        nickname=nickname,
+        role="student",
+        education_level=education_level or "unset",
+    )
 
 
 def _extract_bearer(authorization: str | None) -> str | None:

@@ -10,6 +10,7 @@ from typing import Any
 
 from app.agents.prompts import STRICT_SYSTEM_PROMPT, SYSTEM_PROMPT, current_date_line
 from app.agents.state import AgentState
+from app.services.profile import profile_prompt_line
 
 def _history_messages(state: AgentState, limit: int = 6) -> list[dict[str, str]]:
     history = state.history or []
@@ -42,7 +43,9 @@ def build_messages(state: AgentState, strict: bool = False) -> list[dict[str, st
             "role": "system",
             "content": (STRICT_SYSTEM_PROMPT if strict else SYSTEM_PROMPT)
             + "\n"
-            + current_date_line(),
+            + current_date_line()
+            + "\n"
+            + profile_prompt_line(state.user_education),
         }
     ]
     messages.extend(_history_messages(state, limit=6))

@@ -58,7 +58,7 @@ def build_router(settings: Settings) -> APIRouter:
         except user_service.UserAdminError as exc:
             raise _translate(exc) from exc
 
-    @router.patch("/users/{user_id}", summary="修改用户昵称/角色/状态（仅管理员）")
+    @router.patch("/users/{user_id}", summary="修改用户昵称/角色/状态/身份画像（仅管理员）")
     async def update_user_api(
         user_id: int,
         payload: UserUpdateRequest,
@@ -74,17 +74,21 @@ def build_router(settings: Settings) -> APIRouter:
                     nickname=payload.nickname,
                     role=payload.role,
                     status=payload.status,
+                    education_level=payload.education_level,
+                    college=payload.college,
+                    grade=payload.grade,
                 )
             )
         except user_service.UserAdminError as exc:
             raise _translate(exc) from exc
         logger.info(
-            "管理员改用户 actor=%s target=%s nickname=%s role=%s status=%s",
+            "管理员改用户 actor=%s target=%s nickname=%s role=%s status=%s edu=%s",
             user.id,
             user_id,
             payload.nickname,
             payload.role,
             payload.status,
+            payload.education_level,
         )
         return result
 

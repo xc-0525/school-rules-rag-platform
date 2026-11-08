@@ -451,6 +451,10 @@ class RulesIngestor:
         from app.db.models import Chunk, Document, DocumentTag, DocumentTagRelation
 
         point_ids = [str(uuid.uuid4()) for _ in document.chunks]
+        # N-20：按标题判定适用对象（含“专科”→专科，含“本科”→本科，其余通用）
+        from app.services.profile import infer_education_level
+
+        education_level = infer_education_level(f"{document.title} {document.file_name}")
 
         # 1) MySQL：documents + chunks
         with new_session(self.mysql_url) as session:
@@ -464,6 +468,7 @@ class RulesIngestor:
                 file_size=file_size,
                 chunk_count=len(document.chunks),
                 status="done",
+                education_level=education_level,
                 updated_at=datetime.now(),
             )
             session.add(record)
@@ -516,6 +521,7 @@ class RulesIngestor:
                         "document_id": document_id,
                         "document": document.title,
                         "file_name": document.file_name,
+                        "education_level": education_level,
                         "chapter": chunk.chapter,
                         "article": chunk.article,
                         "chunk_index": chunk.chunk_index,
