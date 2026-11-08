@@ -135,7 +135,7 @@ def list_feedback(
                  WHERE mu.conversation_id = ma.conversation_id
                    AND mu.role = 'user' AND mu.id < ma.id
                  ORDER BY mu.id DESC LIMIT 1) AS question,
-               LEFT(ma.content, 200) AS answer
+               LEFT(ma.content, 120) AS answer
           FROM feedback f
           JOIN messages ma ON ma.id = f.message_id
           LEFT JOIN users u ON u.id = f.user_id

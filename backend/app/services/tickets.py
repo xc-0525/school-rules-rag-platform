@@ -284,7 +284,8 @@ def list_tickets(
             .all()
         )
         names = _usernames(session, {int(r.user_id) for r in rows})
-        return ([_row_dict(r, names.get(int(r.user_id))) for r in rows], int(total))
+        # 统一走 _decorate：DB 取回的是 datetime，接口模型要求字符串
+        return ([_decorate(_row_dict(r, names.get(int(r.user_id)))) for r in rows], int(total))
 
 
 def _match_keyword(row: dict[str, Any], keyword: str) -> bool:

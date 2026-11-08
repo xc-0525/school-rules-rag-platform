@@ -65,7 +65,7 @@
           </el-table-column>
           <el-table-column label="回答摘要" min-width="220">
             <template #default="{ row }">
-              <span class="muted">{{ row.answer || '-' }}</span>
+              <div class="fa-answer" :title="row.answer || ''">{{ row.answer || '-' }}</div>
             </template>
           </el-table-column>
           <el-table-column label="归因" width="102">
@@ -506,6 +506,15 @@ onMounted(loadFeedback)
 .fa-comment {
   font-size: 12px;
   margin-top: 3px;
+}
+
+.fa-answer {
+  font-size: 12px;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .fa-pager {
