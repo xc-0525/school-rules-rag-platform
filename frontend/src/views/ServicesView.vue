@@ -280,6 +280,7 @@
             <el-option label="已关闭" value="closed" />
           </el-select>
           <el-button :loading="ticketLoading" @click="loadTickets">刷新</el-button>
+          <el-button type="primary" @click="openTicketDialog">提工单</el-button>
           <router-link v-if="auth.isAdmin" to="/admin/tickets">
             <el-button link type="primary">去工单处理台</el-button>
           </router-link>
@@ -304,6 +305,46 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 提工单：问答之外的第二入口（N-01） -->
+    <el-dialog v-model="ticketDialog" title="提交工单" width="560px" :close-on-click-modal="false">
+      <el-form :model="ticketForm" label-width="90px">
+        <el-form-item label="标题" required>
+          <el-input
+            v-model="ticketForm.title"
+            maxlength="100"
+            show-word-limit
+            placeholder="一句话说明要反映的问题，如：宿舍熄灯后走廊噪音"
+          />
+        </el-form-item>
+        <el-form-item label="分类">
+          <el-select v-model="ticketForm.category" style="width: 160px">
+            <el-option label="宿舍" value="宿舍" />
+            <el-option label="教学" value="教学" />
+            <el-option label="食堂" value="食堂" />
+            <el-option label="网络" value="网络" />
+            <el-option label="其他" value="其他" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="描述" required>
+          <el-input
+            v-model="ticketForm.description"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+            placeholder="写清时间、地点、影响，至少 5 个字"
+          />
+        </el-form-item>
+      </el-form>
+      <div class="muted" style="font-size: 12px">
+        提交后进入“待受理”，管理员受理、关闭后处理意见会显示在本页。
+      </div>
+      <template #footer>
+        <el-button @click="ticketDialog = false">取消</el-button>
+        <el-button type="primary" :loading="ticketSaving" @click="submitTicket">提交</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 报修申请弹窗 -->
     <el-dialog v-model="repairDialog" title="提交报修申请" width="560px" :close-on-click-modal="false">
@@ -486,6 +527,7 @@ import {
   fetchReservations,
   fetchTickets,
   resolveLostFound,
+  confirmTicket,
   reviewLostFound,
   transitionRepair,
   transitionReservation,
@@ -1034,6 +1076,42 @@ async function loadTickets() {
     ElMessage.error(`加载工单失败：${error?.message || error}`)
   } finally {
     ticketLoading.value = false
+  }
+}
+
+const ticketDialog = ref(false)
+const ticketSaving = ref(false)
+const ticketForm = ref({ title: '', category: '宿舍', description: '' })
+
+function openTicketDialog() {
+  ticketForm.value = { title: '', category: '宿舍', description: '' }
+  ticketDialog.value = true
+}
+
+async function submitTicket() {
+  const form = ticketForm.value
+  if (!form.title.trim()) {
+    ElMessage.warning('标题不能为空')
+    return
+  }
+  if (form.description.trim().length < 5) {
+    ElMessage.warning('描述至少 5 个字，写清时间、地点与影响')
+    return
+  }
+  ticketSaving.value = true
+  try {
+    const receipt = await confirmTicket({
+      title: form.title.trim(),
+      description: form.description.trim(),
+      category: form.category,
+    })
+    ElMessage.success(`已提交，工单号 ${receipt.ticket_no}`)
+    ticketDialog.value = false
+    await loadTickets()
+  } catch (error: any) {
+    ElMessage.error(`${error?.message || error}`)
+  } finally {
+    ticketSaving.value = false
   }
 }
 
