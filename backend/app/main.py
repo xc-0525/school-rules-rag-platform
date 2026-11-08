@@ -22,6 +22,7 @@ from app.api.v1.chat import build_router
 from app.api.v1.conversations import build_router as build_conversations_router
 from app.api.v1.documents import build_router as build_documents_router
 from app.api.v1.lostfound import build_router as build_lostfound_router
+from app.api.v1.admin_users import build_router as build_admin_users_router
 from app.api.v1.notices import build_router as build_notices_router
 from app.api.v1.repairs import build_router as build_repairs_router
 from app.api.v1.reservations import build_router as build_reservations_router
@@ -167,6 +168,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     app.include_router(build_repairs_router(settings))
     app.include_router(build_reservations_router(settings))
     app.include_router(build_lostfound_router(settings))
+    app.include_router(build_admin_users_router(settings))
 
     # 单端口演示：SERVE_FRONTEND=1 且 frontend/dist 存在时，后端直接托管前端
     frontend_dist = BASE_DIR.parent / "frontend" / "dist"

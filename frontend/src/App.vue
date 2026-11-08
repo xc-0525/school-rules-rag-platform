@@ -34,6 +34,10 @@
         </el-menu-item>
 
         <li class="menu-group">系统</li>
+        <el-menu-item v-if="auth.isAdmin" index="/admin/users">
+          <el-icon><UserFilled /></el-icon>
+          <span>用户管理</span>
+        </el-menu-item>
         <el-menu-item index="/documents">
           <el-icon><Document /></el-icon>
           <span>文档管理</span>
@@ -94,7 +98,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Bell, ChatDotRound, Clock, Document, InfoFilled, Suitcase } from '@element-plus/icons-vue'
+import {
+  Bell,
+  ChatDotRound,
+  Clock,
+  Document,
+  InfoFilled,
+  Suitcase,
+  UserFilled,
+} from '@element-plus/icons-vue'
 import NoticeBanner from './components/NoticeBanner.vue'
 import emblem from './assets/wut-emblem.jpg'
 import { fetchHealth } from './api/client'

@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { getToken } from '../utils/session'
+import { getToken, getUser } from '../utils/session'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -42,6 +42,13 @@ const router = createRouter({
       meta: { title: '文档管理' },
     },
     {
+      path: '/admin/users',
+      name: 'admin-users',
+      component: () => import('../views/UserAdminView.vue'),
+      // 仅管理员：菜单不显示 + 守卫拦截手输 URL
+      meta: { title: '用户管理', requiresAdmin: true },
+    },
+    {
       path: '/about',
       name: 'about',
       component: () => import('../views/AboutView.vue'),
@@ -58,6 +65,9 @@ router.beforeEach((to) => {
   }
   if (!loggedIn) {
     return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  if (to.meta.requiresAdmin && getUser()?.role !== 'admin') {
+    return { path: '/chat' }
   }
   return true
 })

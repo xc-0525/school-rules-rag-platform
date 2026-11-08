@@ -1,4 +1,7 @@
 import type {
+  AdminUserItem,
+  AdminUserPage,
+  AdminUserUpdate,
   AvailabilityInfo,
   ConversationDetail,
   ConversationPage,
@@ -414,4 +417,40 @@ export async function fetchDocumentPreviewUrl(id: number): Promise<string> {
   }
   const blob = await response.blob()
   return URL.createObjectURL(blob)
+}
+
+// ---------------- 用户账号管理（仅管理员） ----------------
+export function fetchAdminUsers(params: {
+  keyword?: string
+  role?: string
+  status?: number | null
+  limit?: number
+  offset?: number
+}): Promise<AdminUserPage> {
+  const query = new URLSearchParams()
+  if (params.keyword) query.set('keyword', params.keyword)
+  if (params.role) query.set('role', params.role)
+  if (params.status === 0 || params.status === 1) query.set('status', String(params.status))
+  query.set('limit', String(params.limit ?? 20))
+  query.set('offset', String(params.offset ?? 0))
+  return request<AdminUserPage>(`/api/v1/admin/users?${query.toString()}`)
+}
+
+export function updateAdminUser(id: number, payload: AdminUserUpdate): Promise<AdminUserItem> {
+  return request<AdminUserItem>(`/api/v1/admin/users/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function resetUserPassword(
+  id: number,
+  newPassword: string,
+): Promise<AdminUserItem & { tokens_revoked: boolean; self_reset: boolean }> {
+  return request(`/api/v1/admin/users/${id}/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_password: newPassword }),
+  })
 }

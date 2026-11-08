@@ -343,3 +343,28 @@ export interface OcrStatus {
   engine: string
   hint: string
 }
+
+// ---------------- 用户账号管理（仅管理员） ----------------
+export interface AdminUserItem {
+  id: number
+  username: string
+  nickname: string
+  role: string
+  status: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface AdminUserPage {
+  items: AdminUserItem[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
+export interface AdminUserUpdate {
+  nickname?: string
+  role?: string
+  status?: number
+}

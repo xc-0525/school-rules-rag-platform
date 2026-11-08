@@ -139,13 +139,19 @@ class AuthTokenStore:
 
     def issue(self, user: AuthUser) -> tuple[str, int]:
         now = int(time.time())
+        with self._lock:
+            cutoff = self._user_cutoffs.get(int(user.id))
+        # 吊销判定是 `iat <= cutoff`（同秒签发的也拒，换取"禁用即生效"的确定性）。
+        # 代价是：改密/降权后同一秒内重新登录，新 token 的 iat 正好等于 cutoff 会被自己拒掉。
+        # 这里把 iat 抬到 cutoff 之后，既不放松吊销，又保证"拿到新 token 立即可用"。
+        issued_at = now if cutoff is None or now > cutoff else cutoff + 1
         payload = {
             "sub": user.id,
             "u": user.username,
             "n": user.nickname or "",
             "r": user.role,
-            "iat": now,
-            "exp": now + self._ttl,
+            "iat": issued_at,
+            "exp": issued_at + self._ttl,
             "jti": secrets.token_hex(8),
         }
         body = _b64e(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
