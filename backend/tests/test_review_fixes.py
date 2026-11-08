@@ -543,7 +543,7 @@ class TicketFlowTests(unittest.TestCase):
         spec, entry = build_graph(settings)
         state = asyncio.run(
             WorkflowEngine(spec, entry, services, settings).run(
-                AgentState(query="宿舍晚上几点熄灯？", user_id=1)
+                AgentState(query="我要投诉宿舍噪音扰民", user_id=1)
             )
         )
         self.assertTrue(state.tool_only)
@@ -577,7 +577,7 @@ class TicketFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_draft_not_written_until_confirmed(self) -> None:
-        """无明确意图时只出草稿，不落库；确认后才生成工单。"""
+        """M-01：即使意图明确，工具也只出草稿；确认后才生成工单。"""
         settings, services = build_services_for_test()
         runner = ToolRunner(services, settings)
         draft = asyncio.run(
@@ -587,7 +587,7 @@ class TicketFlowTests(unittest.TestCase):
                 user_id=901,
                 conversation_id=None,
                 run_id="draft-run",
-                query="宿舍晚上几点熄灯？",
+                query="我要投诉宿舍噪音，帮我转人工",
             )
         )
         self.assertEqual(draft.payload["status"], "draft")

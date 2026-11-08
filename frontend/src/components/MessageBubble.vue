@@ -85,24 +85,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { Message, ToolDraft } from '../types'
 import { renderMarkdown } from '../utils/markdown'
 import AgentTrace from './AgentTrace.vue'
 import SourceList from './SourceList.vue'
 
-const props = defineProps<{ message: Message }>()
+const props = defineProps<{ message: Message; rating?: number }>()
 const emit = defineEmits<{
   (event: 'feedback', rating: number): void
   /** index 为该草稿在 toolDrafts 中的下标；done 由父组件在请求结束后调用，用于兜底关闭 loading */
   (event: 'confirmDraft', draft: ToolDraft, index: number, done: () => void): void
 }>()
 
-const rating = ref(0)
+// 受控：高亮由父组件决定。点踩要先选原因，取消时不能留下"已提交"的观感
+const rating = computed(() => props.rating ?? 0)
 const confirming = ref(false)
 
 function submitFeedback(value: number) {
-  rating.value = value
   emit('feedback', value)
 }
 

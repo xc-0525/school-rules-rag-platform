@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -20,23 +21,23 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from app.schemas.chat import Evidence, SourceItem
-from app.services.tickets import create_ticket as create_ticket_service
 
 logger = logging.getLogger("app.tools")
 
-# 明确表达"要人工介入"的说法；命中才允许真正写工单。
-# 注意：不要把"报修""失物"这类名词短语放进来——"我的报修到哪了"是查询，
-# 命中后会误触发 create_ticket 建单（查询类走 query_repair_status）。
+# 明确表达"要人工介入"的说法；命中才允许出工单草稿。
+# M-02：移除"坏了/维修/故障/建议"等泛词——"宿舍灯坏了"是报修（走 create_repair_draft），
+# 留着这些词会把报修误建成投诉工单；"人工"改用正则，避免"人工智能"被误判。
 TICKET_INTENT_KEYWORDS = (
-    "投诉", "工单", "转人工", "人工", "反馈", "举报", "建议",
-    "故障", "坏了", "噪音", "扰民", "太吵", "维修", "挂失",
-    "我要报修", "申请报修", "提交报修",
+    "投诉", "举报", "转人工", "工单", "反馈",
 )
+_TICKET_MANUAL_RE = re.compile(r"人工(?!智能)")
 
 
 def _has_ticket_intent(query: str) -> bool:
     text = (query or "").strip()
-    return any(keyword in text for keyword in TICKET_INTENT_KEYWORDS)
+    if any(keyword in text for keyword in TICKET_INTENT_KEYWORDS):
+        return True
+    return bool(_TICKET_MANUAL_RE.search(text))
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -79,8 +80,9 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "create_ticket",
             "description": (
-                "提交转人工/投诉工单，适用于设备报修、宿舍噪音、服务投诉等"
-                "无法由知识库直接解决、需要人工跟进的事项。"
+                "提交投诉/举报/服务建议工单（只生成待确认草稿，不会直接落库）。"
+                "适用于需要人工跟进的非报修事项：服务投诉、违规举报、流程建议。"
+                "寝室水电/网络/家具/门窗故障请用 create_repair_draft，不要用本工具。"
             ),
             "parameters": {
                 "type": "object",
@@ -403,7 +405,8 @@ CAMPUS_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "name": "create_repair_draft",
             "description": (
                 "为当前用户生成寝室报修申请草稿（不会直接提交，必须由用户点“确认提交报修”）。"
-                "适用于“宿舍水龙头坏了帮我报修”“12栋305空调不制冷，报个修”。"
+                "适用于寝室水电/网络/家具/门窗故障，如“宿舍水龙头坏了”“12栋305空调不制冷”。"
+                "投诉、举报、服务建议请用 create_ticket，不要用本工具。"
                 "楼栋、房间号、联系方式必填，缺失时先追问；"
                 "即使信息不全也要先调用本工具，由工具返回缺哪些字段再追问；"
                 "提交后进入待受理（pending），每日上限与同房间同类型判重会在提交时校验。"
@@ -682,67 +685,49 @@ class ToolRunner:
         if not description:
             raise ValueError("create_ticket 缺少 description 参数")
 
-        # P1-7：写操作必须有明确的用户意图，不能"聊到宿舍噪音就自动建单"
+        # M-02：意图闸门保留，语义从"命中则直接落库"改成"命中才出草稿"。
+        # 泛词（坏了/维修/故障/建议）已移出关键词，报修类问题由 create_repair_draft 承接，
+        # 所以这里判不中说明"用户并没有要投诉"，不该给一张会被误点确认的草稿。
         if getattr(self.settings, "ticket_require_intent", True) and not _has_ticket_intent(query):
-            draft = (
-                f"已整理工单草稿（尚未提交）：{title}\n分类：{category}\n"
-                "如确认需要人工跟进，请回复「确认提交工单」，系统会正式提交并返回工单号。"
-            )
             return ToolResult(
                 name="create_ticket",
                 arguments={"title": title, "description": description, "category": category},
-                success=True,
-                summary=draft,
-                sources=[
-                    SourceItem(
-                        type="tool",
-                        title="工单草稿（未提交）",
-                        detail=f"分类：{category}",
-                        snippet=draft,
-                    )
-                ],
-                payload={
-                    "status": "draft",
-                    "requires_confirmation": True,
-                    # 结构化回传草稿，前端"确认提交"直接用它调 POST /api/v1/tickets
-                    "title": title,
-                    "description": description,
-                    "category": category,
-                },
+                success=False,
+                summary=(
+                    "用户这句话没有明确的投诉 / 举报 / 转人工意图，未生成工单草稿。"
+                    "如果是寝室水电、网络、家具、门窗故障，请改用 create_repair_draft；"
+                    "如果是在咨询制度或流程，请直接用检索工具的结果回答。"
+                ),
+                payload={"status": "rejected", "requires_confirmation": False},
             )
 
-        # 与 POST /api/v1/tickets 共用同一套幂等逻辑（services/tickets.py）
-        receipt = await asyncio.to_thread(
-            create_ticket_service,
-            self.settings,
-            user_id,
-            title,
-            description,
-            category,
+        # M-01：一律只出草稿。写库只发生在用户点"确认提交"之后调用的 POST /api/v1/tickets，
+        # 工具侧绝不直接建单——否则"聊到宿舍噪音"就会在用户不知情时落一条工单。
+        draft = (
+            f"已生成工单草稿（尚未提交）：{title}\n分类：{category}\n"
+            "请点击下方「确认提交工单」按钮后再正式提交；未确认前不会出现在工单列表里。"
         )
-        ticket_no = receipt.ticket_no
-
-        summary = (
-            f"已提交转人工工单：{ticket_no}\n"
-            f"标题：{title}\n分类：{category}\n"
-            "学工部门会尽快跟进；如需补充材料，请保留工单号。"
-        )
-        if receipt.reused:
-            summary = summary.replace("已提交转人工工单", "已存在相同工单（未重复创建）")
         return ToolResult(
             name="create_ticket",
             arguments={"title": title, "description": description, "category": category},
             success=True,
-            summary=summary,
+            summary=draft,
             sources=[
                 SourceItem(
                     type="tool",
-                    title=f"工单 {ticket_no}",
+                    title="工单草稿（未提交）",
                     detail=f"分类：{category}",
-                    snippet=summary,
+                    snippet=draft,
                 )
             ],
-            payload={"ticket_no": ticket_no, "status": receipt.status, "reused": receipt.reused},
+            payload={
+                "status": "draft",
+                "requires_confirmation": True,
+                # 结构化回传草稿，前端"确认提交"直接用它调 POST /api/v1/tickets
+                "title": title,
+                "description": description,
+                "category": category,
+            },
         )
 
     # ---------------------------------------------------------- 校园服务只读工具

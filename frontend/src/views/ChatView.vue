@@ -44,6 +44,7 @@
         v-for="(message, index) in store.messages"
         :key="message.clientId ?? index"
         :message="message"
+        :rating="ratingOf(message)"
         @feedback="(rating) => onFeedback(message, rating)"
         @confirm-draft="(draft, draftIndex, done) => onConfirmDraft(index, draft, draftIndex, done)"
       />
@@ -72,6 +73,12 @@
       <el-button v-if="store.busy" size="large" @click="stop">停止</el-button>
       <el-button v-else type="primary" size="large" @click="send">发送</el-button>
     </div>
+
+    <FeedbackReasonDialog
+      v-model="reasonDialog"
+      :submitting="submittingFeedback"
+      @confirm="submitReason"
+    />
   </div>
 </template>
 
@@ -79,6 +86,7 @@
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import MessageBubble from '../components/MessageBubble.vue'
+import FeedbackReasonDialog from '../components/FeedbackReasonDialog.vue'
 import { useChatStore } from '../stores/chat'
 import { streamChat } from '../api/sse'
 import {
@@ -99,6 +107,12 @@ const scrollRef = ref<HTMLElement | null>(null)
 const nearBottom = ref(true)
 // 当前在途问答的取消句柄：切页或开新对话时中止，避免前端白等、后端白算
 let controller: AbortController | null = null
+
+// 反馈：高亮由这里决定（点踩要先选原因，取消时不留"已提交"观感）
+const ratings = ref<Record<string, number>>({})
+const reasonDialog = ref(false)
+const pendingMessage = ref<Message | null>(null)
+const submittingFeedback = ref(false)
 
 /**
  * 第 5 条是刻意留的「防幻觉拒答」演示，加角标说明，
@@ -350,18 +364,53 @@ async function confirmTicketDraft(index: number, draft: ToolDraft) {
 }
 
 async function onFeedback(message: Message, rating: number) {
-  if (!message.id) {
-    await store.syncMessageIds()
+  // 点踩必须先选原因（M-03）：低分没有归因就无法进入运营工作台
+  if (rating < 0) {
+    if (!message.id) await store.syncMessageIds()
+    if (!message.id) {
+      ElMessage.warning('消息尚未落库，稍后再试')
+      return
+    }
+    pendingMessage.value = message
+    reasonDialog.value = true
+    return
   }
+  await sendRating(message, 1)
+}
+
+function messageKey(message: Message): string {
+  return String(message.id ?? message.clientId ?? '')
+}
+
+function ratingOf(message: Message): number {
+  return ratings.value[messageKey(message)] ?? 0
+}
+
+async function sendRating(message: Message, rating: number, comment?: string) {
+  if (!message.id) await store.syncMessageIds()
   if (!message.id) {
     ElMessage.warning('消息尚未落库，稍后再试')
     return
   }
   try {
-    await sendFeedback(message.id, rating)
-    ElMessage.success(rating > 0 ? '感谢反馈：有帮助' : '已记录：没帮助')
+    await sendFeedback(message.id, rating, comment)
+    ratings.value[messageKey(message)] = rating
+    ElMessage.success(rating > 0 ? '感谢反馈：有帮助' : '已记录没帮助的原因')
   } catch (error: any) {
     ElMessage.error(`反馈失败：${error?.message || error}`)
+  }
+}
+
+async function submitReason(comment: string) {
+  const message = pendingMessage.value
+  if (!message) return
+  submittingFeedback.value = true
+  try {
+    await sendRating(message, -1, comment)
+    reasonDialog.value = false
+    pendingMessage.value = null
+  } finally {
+    submittingFeedback.value = false
   }
 }
 </script>

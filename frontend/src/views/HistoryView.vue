@@ -70,12 +70,19 @@
             v-for="(message, index) in displayMessages"
             :key="message.id ?? `hist-${index}`"
             :message="message"
+            :rating="ratingOf(message)"
             @feedback="(rating) => onFeedback(message, rating)"
           />
         </template>
       </div>
     </el-col>
   </el-row>
+
+  <FeedbackReasonDialog
+    v-model="reasonDialog"
+    :submitting="submittingFeedback"
+    @confirm="submitReason"
+  />
 </template>
 
 <script setup lang="ts">
@@ -84,6 +91,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import MessageBubble from '../components/MessageBubble.vue'
+import FeedbackReasonDialog from '../components/FeedbackReasonDialog.vue'
 import { fetchConversation, fetchConversations, sendFeedback } from '../api/client'
 import { useChatStore } from '../stores/chat'
 import type { ConversationDetail, ConversationItem, Message } from '../types'
@@ -96,6 +104,12 @@ const PAGE_SIZE = 10
 
 const items = ref<ConversationItem[]>([])
 const total = ref(0)
+// 反馈状态：高亮由父组件控制，点踩取消不留痕迹
+const ratings = ref<Record<string, number>>({})
+const reasonDialog = ref(false)
+const pendingMessage = ref<Message | null>(null)
+const submittingFeedback = ref(false)
+
 const keyword = ref('')
 const loading = ref(false)
 const loadingMore = ref(false)
@@ -192,11 +206,44 @@ function continueConversation() {
 
 async function onFeedback(message: Message, rating: number) {
   if (!message.id) return
+  // 点踩先问原因（M-03）；点赞直接提交
+  if (rating < 0) {
+    pendingMessage.value = message
+    reasonDialog.value = true
+    return
+  }
+  await sendRating(message, 1)
+}
+
+function messageKey(message: Message): string {
+  return String(message.id ?? '')
+}
+
+function ratingOf(message: Message): number {
+  return ratings.value[messageKey(message)] ?? 0
+}
+
+async function sendRating(message: Message, rating: number, comment?: string) {
+  if (!message.id) return
   try {
-    await sendFeedback(message.id, rating)
-    ElMessage.success('反馈已记录')
+    await sendFeedback(message.id, rating, comment)
+    ratings.value[messageKey(message)] = rating
+    ElMessage.success(rating > 0 ? '反馈已记录：有帮助' : '已记录没帮助的原因')
   } catch (error: any) {
     ElMessage.error(`反馈失败：${error?.message || error}`)
+  }
+}
+
+async function submitReason(comment: string) {
+  const message = pendingMessage.value
+  if (!message) return
+  submittingFeedback.value = true
+  try {
+    await sendRating(message, -1, comment)
+    reasonDialog.value = false
+    pendingMessage.value = null
+  } finally {
+    submittingFeedback.value = false
   }
 }
 

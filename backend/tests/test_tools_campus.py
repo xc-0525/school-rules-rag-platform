@@ -398,9 +398,15 @@ class ToolDefinitionTests(unittest.TestCase):
                 tools_module._has_ticket_intent(question),
                 f"查询不应命中建单意图：{question}",
             )
-        # 明确的申请/投诉仍命中
-        for question in ("我要报修", "申请报修", "食堂服务太差我要投诉"):
-            self.assertTrue(tools_module._has_ticket_intent(question))
+        # M-02 验收：报修类不再命中工单意图（由 create_repair_draft 承接）
+        for question in ("宿舍灯坏了", "12栋305空调不制冷，报个修", "什么是人工智能"):
+            self.assertFalse(
+                tools_module._has_ticket_intent(question),
+                f"报修/无关问法不应命中工单意图：{question}",
+            )
+        # 明确的投诉/举报/转人工仍命中
+        for question in ("我要投诉宿管", "食堂服务太差我要投诉", "帮我转人工", "我要举报室友违规用电"):
+            self.assertTrue(tools_module._has_ticket_intent(question), question)
 
 
 if __name__ == "__main__":

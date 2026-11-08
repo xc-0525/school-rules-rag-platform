@@ -134,9 +134,12 @@ class ToolRunnerTests(unittest.TestCase):
                 query="我要投诉宿舍噪音，帮我转人工",
             )
         )
+        # M-01：工具只出草稿，写入只发生在用户确认后的 POST /api/v1/tickets
         self.assertTrue(result.success)
-        self.assertRegex(result.payload["ticket_no"], r"^T\d{8}[A-Z0-9]+$")
-        self.assertIn("工单", result.summary)
+        self.assertEqual(result.payload.get("status"), "draft")
+        self.assertTrue(result.payload.get("requires_confirmation"))
+        self.assertNotIn("ticket_no", result.payload)
+        self.assertIn("草稿", result.summary)
 
     def test_create_ticket_requires_intent(self) -> None:
         """P1-7：用户没表达投诉/报修意图时只生成草稿，不落库。"""
@@ -152,9 +155,11 @@ class ToolRunnerTests(unittest.TestCase):
                 query="宿舍晚上几点熄灯？",
             )
         )
-        self.assertEqual(result.payload.get("status"), "draft")
-        self.assertNotIn("ticket_no", result.payload)
-        self.assertIn("草稿", result.summary)
+        # M-02：意图闸门判不中时直接拒绝出草稿，并指路报修工具
+        self.assertFalse(result.success)
+        self.assertEqual(result.payload.get("status"), "rejected")
+        self.assertFalse(result.payload.get("requires_confirmation"))
+        self.assertIn("create_repair_draft", result.summary)
 
 
 class ToolCallingGraphTests(unittest.TestCase):
