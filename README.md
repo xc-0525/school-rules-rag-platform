@@ -16,7 +16,7 @@
 
 ---
 
-## 📌 当前进度（2026-10-26 更新）
+## 📌 当前进度（2026-11-08 更新）
 
 > **两套可运行版本**：
 > 1. **极简版** [`backend/main.py`](backend/main.py)：单文件 MVP，Mock 双 Agent + DeepSeek 流式，40 项冒烟检查通过；
@@ -26,9 +26,9 @@
 | --- | --- | --- |
 | 极简版主循环 `POST /chat` | ✅ 可直接运行 | [`backend/main.py`](backend/main.py) |
 | v2 Agent 图引擎（15 节点，并行/选择/循环） | ✅ 已完成，SSE 实时输出轨迹 | [`backend/app/agents/`](backend/app/agents/) |
-| Tool Calling + 多轮记忆 | ✅ 3 个真实工具 + LLM 自主选工具 + 追问改写 | [`backend/app/agents/tools.py`](backend/app/agents/tools.py) |
+| Tool Calling + 多轮记忆 | ✅ 13 个工具（7 只读 + 6 写操作草稿）+ LLM 自主选工具 + 追问改写 | [`backend/app/agents/tools.py`](backend/app/agents/tools.py) |
 | v2 真实向量检索（Qdrant 本地嵌入式 + BGE-small-zh） | ✅ 已实测（512 维，检索约 0.05s/次） | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
-| v2 MySQL 落库 / 会话历史 / 点赞点踩 | ✅ 11 张表 + 真实 DeepSeek 全链路通过 | [`backend/app/services/persistence.py`](backend/app/services/persistence.py) |
+| v2 MySQL 落库 / 会话历史 / 点赞点踩 | ✅ 16 张表 + 真实 DeepSeek 全链路通过 | [`backend/app/services/persistence.py`](backend/app/services/persistence.py) |
 | v2 真实 Neo4j 图谱 | ✅ 已灌入真实语料（21 篇校规 / 498 条条款），双路召回已验证 | [`backend/app/services/stores.py`](backend/app/services/stores.py) |
 | 校规文档入库流水线 | ✅ 解析 → MySQL → BGE → Qdrant → Neo4j（命令行 + 上传接口） | [`backend/scripts/ingest_rules.py`](backend/scripts/ingest_rules.py) |
 | 文档上传 / 列表 / 详情 / 删除 API | ✅ `.md/.txt` + 文字版 PDF（base64）；扫描件自动 OCR（已实测，单页约 8s） | [`backend/app/api/v1/documents.py`](backend/app/api/v1/documents.py) |
@@ -36,6 +36,10 @@
 | 语料抓取清洗脚本 | ✅ 三种页面模板抽取 → 去页面元信息 → 章节/条款结构化 → 输出可入库 Markdown | [`backend/scripts/fetch_rules.py`](backend/scripts/fetch_rules.py) |
 | Vue3 前端（问答 / 轨迹 / 历史 / 文档） | ✅ 已完成：SSE 流式问答 + Agent 轨迹 + 来源引用 + 会话历史 + 文档管理 | [`frontend/`](frontend/) |
 | 登录鉴权（admin / student） | ✅ 登录页 + 学生自助注册 + Bearer token + 按用户隔离会话；管理员才能上传/删除文档 | [`backend/app/services/auth.py`](backend/app/services/auth.py) |
+| 工单闭环（N-01） | ✅ 提交 → 受理 → 记录进展 → 关闭；关闭必填处理意见、学生端可见；越权 404 | [`backend/app/services/tickets.py`](backend/app/services/tickets.py) |
+| 反馈与未命中工作台（N-25） | ✅ 点踩归因 → 已补语料 → 已复核；未命中问题按归一化聚合 | [`backend/app/services/feedback_admin.py`](backend/app/services/feedback_admin.py) |
+| 运营看板（N-24） | ✅ 提问量/活跃/拒答率/点赞率/P50-P95 + 未命中 Top，60 秒缓存 | [`backend/app/services/analytics.py`](backend/app/services/analytics.py) |
+| 身份画像（N-20） | ✅ 本科/专科口径分流；检索按文档适用对象过滤；未设置不硬猜 | [`backend/app/services/profile.py`](backend/app/services/profile.py) |
 | Docker 公网部署 | 🟡 Dockerfile ×2 + Compose + 部署文档已就绪；配置已通过 `docker compose config` 校验，待启动 Docker daemon 做镜像构建实测 | [`docker-compose.yml`](docker-compose.yml) · [`docs/deploy-public.md`](docs/deploy-public.md) |
 | 数据库建表脚本 | ✅ 已补齐，兼容 MySQL 5.5 / 8.0 | [`sql/init_mysql.sql`](sql/init_mysql.sql) |
 
@@ -62,11 +66,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
 
 > 单端口模式需要先构建一次前端：`cd frontend; npm run build`（已构建过可跳过）；
 > 后端会把 `frontend/dist` 挂到 `8000`，`/api`、`/docs`、`/health` 仍然照常可用。
+> 若本机因安全软件拦截 esbuild 导致 `npm run build` 失败（`remove ...: Access is denied`），可只用开发模式：`npm run dev` 起 5173，接口代理到 8000。
 > 不设置 `SERVE_FRONTEND=1` 时，`http://127.0.0.1:8000/` 仍返回后端信息 JSON。
 
 > 手动启动：`cd backend; uvicorn app.main:app --port 8000`（默认 mock 模式，秒起，适合离线兜底）。
 > 实际演示用 `start_backend.ps1` 时会自动设置 `AUTH_REQUIRED=1`（所有业务接口需带 Bearer token）。
-> 当前测试：**308 项自动化用例，307 项通过、1 项按环境跳过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆 + 审查整改/融合闸门/工单确认 + 用户管理 + 列表筛选 + 密码策略/日志脱敏）；
+> 当前测试：**351 项自动化用例，349 项通过、2 项按环境跳过**（图引擎 + SSE + MySQL 落库/历史/反馈 + 文档解析 + PDF + Neo4j 图谱 + 上传接口校验 + 缓存/引用校验回归 + OCR 文本归一化 + multipart 路由 + 登录/注册/鉴权/会话隔离 + Tool Calling/多轮记忆 + 审查整改/融合闸门/工单确认 + 用户管理 + 列表筛选 + 密码策略/日志脱敏）；
 > 真实三库 + 真实 DeepSeek 已验证：答案同时带「知识图谱 · 文档/章节/条款」与「向量检索」两类来源。
 > 本轮已修复：降级答案不再进缓存、文档上传/删除后清空缓存、上传前预检 Neo4j 并在失败时回滚半成品、
 > 图谱标题引用校验误判、启动脚本固定全局 Python。
@@ -113,7 +118,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_frontend.ps1
   - 每条回答附带来源引用（文档、章节、分块 ID），支持逐条核对；
   - 对无证据支撑的问题触发"**拒答并引导人工咨询**"机制，杜绝编造。
 - **高频问题归一化缓存**：对高频问题去掉标点/空格/大小写差异后精确匹配，命中即返回，降低 DeepSeek 调用延迟与成本（真正的向量语义缓存为后续计划）。
-- **完整业务闭环**：多轮会话、问答记录、点赞/点踩反馈、文档上传与处理状态跟踪、标签分类、管理员公告、学生/管理员角色权限。
+- **完整业务闭环**：多轮会话、问答记录、点赞/点踩反馈、文档上传与处理状态跟踪、标签分类、管理员公告、学生/管理员角色权限；2026-11 补齐工单流转、反馈归因、运营看板与身份画像（见 2.1）。
+
+### 2.1 本轮新增（2026-11，四条 P0 扩展）
+
+- **工单闭环**：学生提交 → 管理员受理/记录进展 → 关闭；关闭必须填写处理意见，学生端可见同一句话；学生只能看本人，越权统一 404。
+- **反馈与未命中工作台**：点踩按 `pending → attributed → resolved → verified` 四态流转，归因与补语料说明必填；拒答问题按归一化文本聚合，可标记已补语料/忽略。
+- **运营看板**：提问量、活跃用户、会话数、拒答率、点赞率、P50/P95、工具成功率、趋势、未命中 Top10、最近点踩；全部来自现有表，无额外埋点，60 秒进程内缓存。
+- **身份画像**：用户可设本科/专科（随 token 下发，改资料换发 token）；文档入库标注适用对象，检索时同层次 + 通用文档才保留；未设置时在答案中说明口径差异。
+
+新增接口：`GET/POST /api/v1/tickets`、`POST /api/v1/tickets/{id}/transition`、`GET /api/v1/admin/feedback`、`POST /api/v1/admin/feedback/{id}/transition`、`GET /api/v1/admin/unmatched`、`POST /api/v1/admin/unmatched/{hash}/mark`、`GET /api/v1/admin/stats/overview`、`PATCH /api/v1/auth/profile`。
+数据库迁移：`sql/migrations/008-010`（列/索引/新表，只加不删，可重复执行；统一用 `backend/scripts/apply_extension_migration.py`）。
 
 ## 三、系统架构
 
@@ -219,7 +234,7 @@ erDiagram
     document_tags ||--o{ document_tag_relations : ""
 ```
 
-### 5.3 核心表一览（共 11 张）
+### 5.3 核心表一览（共 16 张）
 
 | # | 表名 | 说明 | 关键字段 |
 | --- | --- | --- | --- |
@@ -234,9 +249,14 @@ erDiagram
 | 9 | `document_tag_relations` | 文档-标签关联表（多对多） | `document_id` + `tag_id` 联合唯一 |
 | 10 | `tickets` | 转人工/投诉工单表（`create_ticket` Tool 写入） | `ticket_no` 唯一、`status`（open/processing/closed） |
 | 11 | `tool_call_logs` | Tool Calling 审计日志（Agent 可观测性） | `run_id`、`tool_name`、`arguments`、`success`、`latency_ms` |
+| 12 | `repair_requests` | 寝室报修表 | `status`（pending/processing/completed/closed）、`building`、`room` |
+| 13 | `reservable_locations` | 可预约位置（容量模型） | `name`、`zone`、`capacity` |
+| 14 | `location_reservations` | 座位预约记录 | `location_id`、`res_date`、`slot`、`status` |
+| 15 | `lost_found_items` | 失物招领条目 | `kind`（lost/found）、`status`（先审后发） |
+| 16 | `unmatched_marks` | 未命中问题处理标记 | `query_hash` 主键、`status`、`remark` |
 
 > 建表脚本：`sql/init_mysql.sql`（兼容 MySQL 5.5+ / 8.0，utf8mb4 / InnoDB，含外键级联、索引与种子数据）。
-> 已在本地 MySQL 5.5.11 上实测通过（11 张表 + 2 个账号 + 6 个标签 + 2 条公告）。
+> 已在本地 MySQL 5.5.11 上实测通过（16 张表 + 2 个账号 + 6 个标签 + 2 条公告）。
 
 ### 5.4 初始化数据
 
@@ -357,7 +377,7 @@ curl -N -X POST http://127.0.0.1:8000/chat \
 > 脚本已就绪并通过本机 MySQL 5.5.11 实测；MySQL 8.0 同样兼容。
 
 ```bash
-# 创建数据库 school_rules_rag、建 11 张表并写入种子账号/标签/公告
+# 创建数据库 school_rules_rag、建 16 张表并写入种子账号/标签/公告
 mysql -u root -p --default-character-set=utf8mb4 < sql/init_mysql.sql
 ```
 
@@ -592,7 +612,7 @@ school-rules-rag-platform/
 │   │   ├── services/        #   LLM / Qdrant+BGE / Neo4j / MySQL / 语义缓存适配器
 │   │   ├── db/              #   SQLAlchemy 模型与引擎
 │   │   └── schemas/         #   Pydantic 模型
-│   ├── tests/               # ✅ 308 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 鉴权/注册 + Tool/Memory + 缓存/引用/OCR + 筛选/密码策略回归）
+│   ├── tests/               # ✅ 351 项测试（图引擎 + SSE + MySQL + 解析器 + PDF + Neo4j + 鉴权/注册 + Tool/Memory + 缓存/引用/OCR + 筛选/密码策略回归）
 │   ├── scripts/
 │   │   ├── ingest_rules.py  # ✅ 校规文档入库（MySQL + Qdrant + Neo4j）
 │   │   ├── fetch_rules.py   # ✅ 抓取官网校规并清洗成可入库 Markdown
@@ -628,8 +648,8 @@ school-rules-rag-platform/
 ### ✅ 已完成
 
 - 系统总体架构设计：MySQL + Neo4j + Qdrant 多库混合存储方案
-- MySQL 数据库设计：11 张表、外键与索引、`qdrant_point_id` 映射与溯源链路；建表脚本已落地并通过 5.5.11 实测
-- **Tool Calling + 多轮记忆**：LLM 自主选择 3 个真实工具（检索/公告/工单），ReAct 循环；历史消息注入 + 追问改写
+- MySQL 数据库设计：16 张表、外键与索引、`qdrant_point_id` 映射与溯源链路；建表脚本已落地并通过 5.5.11 实测
+- **Tool Calling + 多轮记忆**：LLM 自主选择 13 个真实工具（7 只读 + 6 写操作草稿），ReAct 循环；历史消息注入 + 追问改写
 - **Docker Compose 公网部署**：frontend/backend/MySQL/Neo4j/Qdrant 五服务，见 `docs/deploy-public.md`
 - **代码审查整改（P0/P1）**：鉴权默认安全 + 匿名独立身份、token 无状态签名、限流/日配额/并发闸门、
   引用校验三态 + 条款号核对、查询拆分为 generation/retrieval、查询扩展不再空转、图谱分按覆盖率标定 + RRF 融合、
@@ -667,7 +687,7 @@ school-rules-rag-platform/
     语义缓存按用户隔离、拒答话术分场景、引用校验状态可见；
   - **本轮回归修复**：降级答案不进缓存、上传/删除后清空缓存、上传前 Neo4j 预检 + 失败回滚、
     图谱证据标题引用校验、启动脚本固定全局 Python、Neo4j driver 复用、multipart 路由 OpenAPI 修复；
-  - 308 项自动化测试（307 通过、1 项按环境跳过）
+  - 351 项自动化测试（349 通过、2 项按环境跳过）
 
 ### 🚧 进行中
 
